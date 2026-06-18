@@ -97,6 +97,29 @@ backtest:
   end: null
   report_dir: "reports"
 
+# --- Live signal generation -------------------------------------------
+live:
+  feed: "csv"                        # binance | mt5 | csv  (csv = offline replay)
+  symbol: "BTCUSDT"                  # EXACT feed symbol (Binance: BTCUSDT; MT5: XAUUSD, ...)
+  poll_seconds: 30                   # how often to poll the feed (live feeds only)
+  htf_limit: 300                     # candles fetched per timeframe
+  mtf_limit: 600
+  ltf_limit: 600
+  send_trade_updates: true           # also message when a signal hits TP/SL
+  state_path: "reports/live_state.json"   # dedup + open-trade persistence across restarts
+
+  # csv replay feed:
+  csv_path: "examples/sample_BTCUSD_1min.csv"
+  csv_start_index: 0
+
+  # binance feed (no key needed):
+  # binance_base_url: "https://api.binance.com"
+
+  # mt5 feed (Windows/VPS, terminal running):
+  # mt5_login: 12345678
+  # mt5_password: ""
+  # mt5_server: ""
+
 # --- Notifications (live signals) -------------------------------------
 notify:
   telegram:

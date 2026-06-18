@@ -13,6 +13,9 @@ from .config import load_config
 from .core.session import Session
 from .core.timeframes import TFSet
 from .data.loader import load_csv
+from .feeds.base import build_feed
+from .live.runner import LiveRunner
+from .notify.telegram import TelegramNotifier
 from .risk.risk_manager import RiskManager, RiskParams
 from .strategy.crt_strategy import CRTStrategy, StrategyParams
 
@@ -58,6 +61,41 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_live(cfg: dict) -> LiveRunner:
+    live = cfg.get("live", {})
+    symbol = live.get("symbol") or cfg.get("symbol", "BTCUSDT")
+    cfg = {**cfg, "symbol": symbol}  # signals carry the live symbol
+
+    tf_set = TFSet.from_config(cfg["tf_sets"], cfg["tf_set"])
+    session = Session.from_config(cfg.get("session", {}))
+    strategy = CRTStrategy(StrategyParams.from_config(cfg, tf_set, session))
+    feed = build_feed(cfg)
+    notifier = TelegramNotifier.from_config(cfg)
+    return LiveRunner(
+        symbol=symbol,
+        feed=feed,
+        strategy=strategy,
+        tf_set=tf_set,
+        notifier=notifier,
+        htf_limit=live.get("htf_limit", 300),
+        mtf_limit=live.get("mtf_limit", 600),
+        ltf_limit=live.get("ltf_limit", 600),
+        send_trade_updates=live.get("send_trade_updates", True),
+        state_path=live.get("state_path"),
+    )
+
+
+def cmd_live(args: argparse.Namespace) -> int:
+    cfg = load_config(args.config)
+    runner = _build_live(cfg)
+    if args.test_telegram:
+        ok = runner.test_telegram()
+        return 0 if ok else 1
+    poll = cfg.get("live", {}).get("poll_seconds", 30)
+    runner.run(poll_seconds=poll, max_steps=args.steps)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="crt-bot", description="CRT trade bot")
     parser.add_argument("--config", help="path to config.yaml", default=None)
@@ -67,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
     bt.add_argument("--data", help="override data CSV path", default=None)
     bt.add_argument("--save", action="store_true", help="save JSON report")
     bt.set_defaults(func=cmd_backtest)
+
+    lv = sub.add_parser("live", help="generate live signals and send to Telegram")
+    lv.add_argument("--steps", type=int, default=None, help="stop after N poll cycles")
+    lv.add_argument("--test-telegram", action="store_true",
+                    help="send a test message and exit")
+    lv.set_defaults(func=cmd_live)
 
     ver = sub.add_parser("version", help="print version")
     ver.set_defaults(func=lambda a: (print(__version__), 0)[1])

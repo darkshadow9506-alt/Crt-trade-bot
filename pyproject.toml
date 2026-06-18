@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crt-trade-bot"
+version = "0.1.0"
+description = "Multi-timeframe CRT (Candlestick Range Theory) day-trading bot: SMC analysis, backtesting and signals."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+mt5 = ["MetaTrader5>=5.0"]
+crypto = ["ccxt>=4.0"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+crt-bot = "crt_bot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["crt_bot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

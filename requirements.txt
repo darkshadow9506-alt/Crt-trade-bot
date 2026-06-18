@@ -1,0 +1,14 @@
+# Core analysis
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+
+# Notifications (live signals)
+requests>=2.31
+
+# Optional execution adapters (install as needed):
+#   MetaTrader5>=5.0   # Windows/VPS only, for prop-firm MT5 execution
+#   ccxt>=4.0          # crypto exchanges (Binance/Bybit/Toobit/...)
+
+# Dev / testing
+pytest>=7.4

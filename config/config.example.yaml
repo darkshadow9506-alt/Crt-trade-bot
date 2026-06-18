@@ -1,0 +1,105 @@
+# ======================================================================
+# CRT Trade Bot - configuration
+# Copy this file to config/config.yaml and edit it.
+# ======================================================================
+
+# --- Instrument / data -------------------------------------------------
+symbol: "BTCUSD"
+# Lowest-timeframe base data the backtester drives on (the engine resamples
+# everything else from this). Use the smallest TF in your chosen tf_set.
+base_timeframe: "1min"
+
+# --- Which multi-timeframe set to trade --------------------------------
+# One of: "1D-1H-15min", "4H-15min-5min", "1H-5min-1min"
+# htf = context / CRT range, mtf = CHoCH + 0.61-0.78 pullback, ltf = entry
+tf_set: "4H-15min-5min"
+
+tf_sets:
+  "1D-1H-15min":   { htf: "1D",  mtf: "1H",    ltf: "15min" }
+  "4H-15min-5min": { htf: "4H",  mtf: "15min", ltf: "5min"  }
+  "1H-5min-1min":  { htf: "1H",  mtf: "5min",  ltf: "1min"  }
+
+# --- Trading session (only look for setups inside this window) ---------
+session:
+  enabled: true
+  name: "new_york"
+  # Times are in the timezone below. NY open killzone by default.
+  timezone: "America/New_York"
+  start: "08:00"     # start hunting for HTF POI after this
+  end: "16:00"       # stop opening new trades after this
+  # also accept the "london" overlap if you want; leave one session for now
+
+# --- Strategy parameters ----------------------------------------------
+strategy:
+  # HTF point-of-interest that must be tagged before we accept a CRT.
+  # Any of these reached => POI condition satisfied.
+  poi:
+    use_fvg: true
+    use_order_block: true
+    use_liquidity_sweep: true        # sweep of previous session high/low
+    lookback_sessions: 3             # how many prior sessions' highs/lows count as liquidity
+
+  # CRT (Candlestick Range Theory) manipulation candle:
+  #   bullish: wick takes previous candle low, body closes back above it
+  #   bearish: wick takes previous candle high, body closes back below it
+  crt:
+    require_close_inside: true       # close must return inside the range candle
+    min_wick_sweep_atr: 0.05         # min sweep depth beyond prev candle (in ATR units), filters noise
+
+  # Market-structure shift confirmation on MTF and LTF.
+  structure:
+    swing_lookback: 2                # fractal strength (bars each side) for swing points
+
+  # Pullback retracement zone on MTF (your 0.61 - 0.78 OTE-deep zone).
+  fib:
+    pullback_min: 0.618
+    pullback_max: 0.79
+    # Target / take-profit logic:
+    #   trend_aligned target  = CRT extreme (full range high/low)
+    #   counter_trend target  = equilibrium (0.5 of CRT range)
+    equilibrium_level: 0.5
+    # If, before entry triggers, price already reached the equilibrium target
+    # in a counter-trend setup => skip the trade entirely.
+    skip_if_eq_already_touched: true
+
+  # LTF entry refinement: enter on inversion FVG (iFVG) or change in
+  # state of delivery (CISD) after the LTF CHoCH.
+  entry:
+    use_ifvg: true
+    use_cisd: true
+    # Stop loss is placed beyond the pullback extreme (the candle that first
+    # tagged the fib zone), padded by this many ATR.
+    sl_padding_atr: 0.1
+    # Minimum reward:risk to accept a trade.
+    min_rr: 1.5
+
+# --- Risk management / prop-firm rules ---------------------------------
+risk:
+  account_balance: 100000.0          # starting balance (prop account size)
+  risk_per_trade_pct: 0.5            # % of balance risked per trade
+  max_open_trades: 1
+  # Prop-firm guardrails (bot stops trading when hit):
+  max_daily_loss_pct: 4.0            # FTMO-style daily loss limit
+  max_total_drawdown_pct: 8.0        # overall max drawdown
+  profit_target_pct: 8.0             # phase profit target (info / stop-when-reached)
+  stop_trading_on_target: false
+
+# --- Costs (for realistic backtests) ----------------------------------
+costs:
+  spread_points: 0.0                 # in price units
+  commission_per_trade: 0.0          # round-turn, account currency
+  slippage_points: 0.0
+
+# --- Backtest ----------------------------------------------------------
+backtest:
+  data_csv: "examples/sample_BTCUSD_1min.csv"
+  start: null                        # e.g. "2026-01-01" or null for all
+  end: null
+  report_dir: "reports"
+
+# --- Notifications (live signals) -------------------------------------
+notify:
+  telegram:
+    enabled: false
+    bot_token: ""                    # from @BotFather
+    chat_id: ""                      # your chat / channel id

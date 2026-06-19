@@ -106,38 +106,37 @@ live:
   #   csv     -> offline replay of a CSV (for testing)
   feed: "csv"
 
+  # For Toobit only: which market to read.
+  #   "spot"    -> symbols like BTCUSDT
+  #   "futures" -> USDT-M perpetuals; metals/indices/stocks (XAUUSDT, NAS100USDT,
+  #                SPX500USDT, TSLAUSDT, ...) live HERE. Just use the app symbol
+  #                (e.g. XAUUSDT); the bot converts it to XAU-SWAP-USDT for you.
+  market: "spot"
+
   # Scan MANY symbols at once. Use EXACT feed symbols. Symbols the feed doesn't
   # list are auto-skipped with a one-time warning. Crypto majors live on
-  # Binance/Toobit; metals & indices (XAUUSDT, NAS100USDT, ...) live on Toobit
-  # or MT5 -- NOT on Binance spot.
+  # Binance/Toobit; metals/indices/stocks live on Toobit USDT-M futures (set
+  # feed: "toobit" + market: "futures") or on MT5 -- NOT on Binance spot.
   symbols:
     - "BTCUSDT"
     - "ETHUSDT"
     - "SOLUSDT"
-    # --- bigger watchlist: uncomment what your feed supports ---
+    # --- more crypto (uncomment what your feed supports) ---
     # - "BNBUSDT"
     # - "XRPUSDT"
-    # - "ADAUSDT"
     # - "DOGEUSDT"
     # - "AVAXUSDT"
     # - "LINKUSDT"
-    # - "DOTUSDT"
-    # - "TRXUSDT"
-    # - "TONUSDT"
     # - "LTCUSDT"
-    # - "BCHUSDT"
-    # - "NEARUSDT"
-    # - "APTUSDT"
-    # - "ARBUSDT"
-    # - "OPUSDT"
-    # - "INJUSDT"
-    # - "SUIUSDT"
-    # --- metals / indices (Toobit or MT5) ---
+    # --- Toobit USDT-M metals / indices / stocks (need market: "futures") ---
     # - "XAUUSDT"        # gold
     # - "XAGUSDT"        # silver
     # - "NAS100USDT"     # Nasdaq 100
-    # - "US30USDT"       # Dow Jones
     # - "SPX500USDT"     # S&P 500
+    # - "GER40USDT"      # DAX 40
+    # - "OILWTIUSDT"     # WTI crude
+    # - "TSLAUSDT"       # Tesla
+    # - "MSTRUSDT"       # MicroStrategy
   symbol: "BTCUSDT"                  # fallback if 'symbols' is empty / single-symbol mode
 
   # Which timeframe sets to run PER symbol: "all" (all three) or a list of names.

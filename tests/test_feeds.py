@@ -49,3 +49,17 @@ def test_feed_endpoints_distinct():
 def test_build_feed_selects_exchange():
     assert isinstance(build_feed({"live": {"feed": "binance"}}), BinancePublicFeed)
     assert isinstance(build_feed({"live": {"feed": "toobit"}}), ToobitFeed)
+
+
+def test_toobit_futures_symbol_conversion():
+    assert ToobitFeed.to_contract_symbol("BTCUSDT") == "BTC-SWAP-USDT"
+    assert ToobitFeed.to_contract_symbol("xauusdt") == "XAU-SWAP-USDT"
+    assert ToobitFeed.to_contract_symbol("NAS100USDT") == "NAS100-SWAP-USDT"
+    assert ToobitFeed.to_contract_symbol("SPX500USDT") == "SPX500-SWAP-USDT"
+    # already-contract symbols pass through
+    assert ToobitFeed.to_contract_symbol("BTC-SWAP-USDT") == "BTC-SWAP-USDT"
+
+
+def test_build_feed_toobit_futures_market():
+    feed = build_feed({"live": {"feed": "toobit", "market": "futures"}})
+    assert isinstance(feed, ToobitFeed) and feed.market == "futures"

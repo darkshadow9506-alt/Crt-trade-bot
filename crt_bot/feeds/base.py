@@ -42,7 +42,10 @@ def build_feed(cfg: dict) -> DataFeed:
     if name == "toobit":
         from .toobit import ToobitFeed
 
-        return ToobitFeed(base_url=live.get("toobit_base_url"))
+        return ToobitFeed(
+            base_url=live.get("toobit_base_url"),
+            market=live.get("market", "spot"),
+        )
     if name == "mt5":
         from .mt5 import MT5Feed
 

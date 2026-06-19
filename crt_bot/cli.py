@@ -71,6 +71,7 @@ def _build_live(cfg: dict) -> LiveRunner:
     strategy = CRTStrategy(StrategyParams.from_config(cfg, tf_set, session))
     feed = build_feed(cfg)
     notifier = TelegramNotifier.from_config(cfg)
+    risk_cfg = cfg.get("risk", {})
     return LiveRunner(
         symbol=symbol,
         feed=feed,
@@ -82,6 +83,9 @@ def _build_live(cfg: dict) -> LiveRunner:
         ltf_limit=live.get("ltf_limit", 600),
         send_trade_updates=live.get("send_trade_updates", True),
         state_path=live.get("state_path"),
+        account_balance=risk_cfg.get("account_balance"),
+        risk_pct=risk_cfg.get("risk_per_trade_pct"),
+        session_name=cfg.get("session", {}).get("name"),
     )
 
 

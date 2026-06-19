@@ -43,6 +43,9 @@ class LiveRunner:
         ltf_limit: int = 600,
         send_trade_updates: bool = True,
         state_path: str | None = None,
+        account_balance: float | None = None,
+        risk_pct: float | None = None,
+        session_name: str | None = None,
         logger=print,
     ):
         self.symbol = symbol
@@ -55,6 +58,9 @@ class LiveRunner:
         self.ltf_limit = ltf_limit
         self.send_trade_updates = send_trade_updates
         self.state_path = state_path
+        self.account_balance = account_balance
+        self.risk_pct = risk_pct
+        self.session_name = session_name
         self.log = logger
 
         self._open_signal: Signal | None = None
@@ -110,7 +116,12 @@ class LiveRunner:
             return
         self._last_sig_key = key
         self._open_signal = sig
-        sent = self.notifier.send_signal(sig)
+        sent = self.notifier.send_signal(
+            sig,
+            account_balance=self.account_balance,
+            risk_pct=self.risk_pct,
+            session_name=self.session_name,
+        )
         self.log(
             f"SIGNAL {sig.symbol} {sig.direction.value.upper()} "
             f"entry={sig.entry:.5f} sl={sig.stop_loss:.5f} tp={sig.take_profit:.5f} "

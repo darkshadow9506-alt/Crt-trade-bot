@@ -53,7 +53,7 @@ strategy:
   # Pullback retracement zone on MTF (your 0.61 - 0.78 OTE-deep zone).
   fib:
     pullback_min: 0.618
-    pullback_max: 0.79
+    pullback_max: 0.786
     # Target / take-profit logic:
     #   trend_aligned target  = CRT extreme (full range high/low)
     #   counter_trend target  = equilibrium (0.5 of CRT range)
@@ -99,8 +99,13 @@ backtest:
 
 # --- Live signal generation -------------------------------------------
 live:
-  feed: "csv"                        # binance | mt5 | csv  (csv = offline replay)
-  symbol: "BTCUSDT"                  # EXACT feed symbol (Binance: BTCUSDT; MT5: XAUUSD, ...)
+  # feed options:
+  #   binance -> crypto, no API key (best data, but geo-blocked in sanctioned regions)
+  #   toobit  -> crypto, no API key (Binance-compatible; use if Binance is blocked)
+  #   mt5     -> forex / metals / indices for prop firms (needs MT5 terminal)
+  #   csv     -> offline replay of a CSV (for testing)
+  feed: "csv"
+  symbol: "BTCUSDT"                  # EXACT feed symbol (Binance/Toobit: BTCUSDT; MT5: XAUUSD, ...)
   poll_seconds: 30                   # how often to poll the feed (live feeds only)
   htf_limit: 300                     # candles fetched per timeframe
   mtf_limit: 600
@@ -112,8 +117,9 @@ live:
   csv_path: "examples/sample_BTCUSD_1min.csv"
   csv_start_index: 0
 
-  # binance feed (no key needed):
+  # crypto feeds (no key needed) -- override host only if you need to:
   # binance_base_url: "https://api.binance.com"
+  # toobit_base_url:  "https://api.toobit.com"
 
   # mt5 feed (Windows/VPS, terminal running):
   # mt5_login: 12345678

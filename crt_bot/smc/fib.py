@@ -10,7 +10,7 @@ def fib_pullback_zone(
     leg_high: float,
     direction: Direction,
     min_level: float = 0.618,
-    max_level: float = 0.79,
+    max_level: float = 0.786,
 ) -> tuple[float, float]:
     """Price band of the ``[min_level, max_level]`` retracement of an impulse.
 

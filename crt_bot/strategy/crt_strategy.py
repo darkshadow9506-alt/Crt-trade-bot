@@ -6,7 +6,7 @@ Pipeline (HTF -> MTF -> LTF), exactly mirroring the trader's playbook:
     prior-session liquidity sweep) **and** print a CRT manipulation candle in
     the same direction. This fixes the trade direction and the CRT range.
 2.  **MTF**: wait for a CHoCH in the CRT direction, then a pullback into the
-    0.618-0.79 fib zone of the impulse leg.
+    0.618-0.786 fib zone of the impulse leg.
 3.  **LTF**: wait for a CHoCH, then enter on an iFVG / CISD trigger.
 
 Risk: SL beyond the pullback extreme (+ ATR padding). Target = CRT extreme when
@@ -56,7 +56,7 @@ class StrategyParams:
 
     # fib
     pullback_min: float = 0.618
-    pullback_max: float = 0.79
+    pullback_max: float = 0.786
     equilibrium_level: float = 0.5
     skip_if_eq_already_touched: bool = True
 
@@ -92,7 +92,7 @@ class StrategyParams:
             min_wick_sweep_atr=crt.get("min_wick_sweep_atr", 0.05),
             swing_lookback=struct.get("swing_lookback", 2),
             pullback_min=fib.get("pullback_min", 0.618),
-            pullback_max=fib.get("pullback_max", 0.79),
+            pullback_max=fib.get("pullback_max", 0.786),
             equilibrium_level=fib.get("equilibrium_level", 0.5),
             skip_if_eq_already_touched=fib.get("skip_if_eq_already_touched", True),
             use_ifvg=entry.get("use_ifvg", True),
@@ -110,18 +110,27 @@ class _Setup:
     direction: Direction
     htf_trend_aligned: bool
     crt_time: pd.Timestamp
+    htf_bias: Direction | None = None
     fib_zone: tuple[float, float] | None = None
     pullback_extreme: float | None = None   # deepest low (long) / high (short)
     choch_mtf_time: pd.Timestamp | None = None
     choch_ltf_time: pd.Timestamp | None = None
+    eq_touched: bool = False                # did price reach the 50% before entry?
     bars_in_state: int = 0
     tags: list[str] = field(default_factory=list)
 
     @property
     def target(self) -> float:
+        # trend-aligned -> full CRT range extreme; counter-trend -> 50% equilibrium
         if self.htf_trend_aligned:
             return self.crt.high if self.direction is Direction.LONG else self.crt.low
         return self.crt.equilibrium
+
+    @property
+    def tp_mode(self) -> str:
+        if self.htf_trend_aligned:
+            return "crt_high" if self.direction is Direction.LONG else "crt_low"
+        return "equilibrium"
 
 
 class CRTStrategy:
@@ -177,9 +186,14 @@ class CRTStrategy:
         if self.setup is not None and self._invalidated(ltf):
             self.reset()
 
+        # Track whether price has already reached the 50% equilibrium at any
+        # point during the setup (used to cancel counter-trend trades).
+        if self.setup is not None and new_ltf and not ltf.empty:
+            self._track_eq(ltf.iloc[-1])
+
         if self.state is SignalState.WAIT_CRT:
             if new_htf:
-                self._scan_htf(now, htf)
+                self._scan_htf(now, htf, ltf)
             return None
 
         if self.state is SignalState.WAIT_MTF_CHOCH:
@@ -205,7 +219,7 @@ class CRTStrategy:
         return None
 
     # -- stage 1: HTF POI + CRT -------------------------------------------
-    def _scan_htf(self, now: pd.Timestamp, htf: pd.DataFrame) -> None:
+    def _scan_htf(self, now: pd.Timestamp, htf: pd.DataFrame, ltf: pd.DataFrame) -> None:
         if self.p.session.enabled and not self.p.session.contains(now):
             return
         if len(htf) < 3:
@@ -224,14 +238,21 @@ class CRTStrategy:
         if not self._poi_confluence(htf, crt.direction, now):
             return
 
-        aligned = self._htf_trend(htf) is crt.direction
+        bias = self._htf_trend(htf)
+        aligned = bias is crt.direction
         self.setup = _Setup(
             crt=crt,
             direction=crt.direction,
             htf_trend_aligned=aligned,
+            htf_bias=bias,
             crt_time=crt.manip_candle_time,
             tags=["crt", "trend_aligned" if aligned else "counter_trend"],
         )
+        # seed the 50% pre-touch flag from any LTF action since the CRT formed
+        if not aligned and not ltf.empty:
+            since = ltf[ltf.index >= self.setup.crt_time]
+            for _, bar in since.iterrows():
+                self._track_eq(bar)
         self.state = SignalState.WAIT_MTF_CHOCH
 
     def _poi_confluence(
@@ -262,8 +283,21 @@ class CRTStrategy:
         return False
 
     def _htf_trend(self, htf: pd.DataFrame) -> Direction | None:
+        """HTF market bias. Primary: latest BOS/CHoCH (market structure).
+        Fallback when structure is unresolved: last close vs its SMA."""
         events = structure_events(htf, self.p.swing_lookback)
-        return events[-1].direction if events else None
+        if events:
+            return events[-1].direction
+        closes = htf["close"]
+        if len(closes) < 3:
+            return None
+        sma = float(closes.tail(min(len(closes), 20)).mean())
+        last = float(closes.iloc[-1])
+        if last > sma:
+            return Direction.LONG
+        if last < sma:
+            return Direction.SHORT
+        return None
 
     # -- stage 2: MTF CHoCH + pullback ------------------------------------
     def _scan_mtf_choch(self, mtf: pd.DataFrame) -> None:
@@ -344,17 +378,19 @@ class CRTStrategy:
 
         last = ltf.iloc[-1]
         self._extend_extreme(last)
+        self._track_eq(last)
         direction = self.setup.direction
 
-        # counter-trend: abort if equilibrium target already reached
-        if not self.setup.htf_trend_aligned and self.p.skip_if_eq_already_touched:
-            eq = self.setup.crt.equilibrium
-            if direction is Direction.LONG and last["high"] >= eq:
-                self.reset()
-                return None
-            if direction is Direction.SHORT and last["low"] <= eq:
-                self.reset()
-                return None
+        # Counter-trend (signal against HTF bias): target is the 50% equilibrium.
+        # If price already reached the 50% at any point before entry, there is no
+        # room left -> cancel the whole setup. (Your: "اگه قبلش برخوردی داشت کنسل".)
+        if (
+            not self.setup.htf_trend_aligned
+            and self.p.skip_if_eq_already_touched
+            and self.setup.eq_touched
+        ):
+            self.reset()
+            return None
 
         trigger = self._entry_trigger(ltf, direction)
         if trigger is None:
@@ -372,6 +408,11 @@ class CRTStrategy:
         else:
             stop = extreme + pad
         target = self.setup.target
+        bias = (
+            "bullish" if self.setup.htf_bias is Direction.LONG
+            else "bearish" if self.setup.htf_bias is Direction.SHORT
+            else "unclear"
+        )
 
         signal = Signal(
             symbol=self.p.symbol,
@@ -382,8 +423,11 @@ class CRTStrategy:
             time=now,
             tf_set=self.p.tf_set.name,
             reason=f"CRT {direction.value} via {trigger}; "
-            + ("trend-aligned->extreme" if self.setup.htf_trend_aligned else "counter->equilibrium"),
+            + ("trend-aligned -> CRT extreme" if self.setup.htf_trend_aligned else "counter-trend -> 50% equilibrium"),
             crt=self.setup.crt,
+            entry_trigger=trigger,
+            tp_mode=self.setup.tp_mode,
+            market_bias=bias,
         )
 
         # sanity: correct side and acceptable reward:risk
@@ -428,6 +472,16 @@ class CRTStrategy:
             self.setup.pullback_extreme = min(self.setup.pullback_extreme, float(last["low"]))
         else:
             self.setup.pullback_extreme = max(self.setup.pullback_extreme, float(last["high"]))
+
+    def _track_eq(self, last: pd.Series) -> None:
+        """Flag if price reached the CRT 50% equilibrium on this candle."""
+        if self.setup is None or self.setup.eq_touched:
+            return
+        eq = self.setup.crt.equilibrium
+        if self.setup.direction is Direction.LONG and float(last["high"]) >= eq:
+            self.setup.eq_touched = True
+        elif self.setup.direction is Direction.SHORT and float(last["low"]) <= eq:
+            self.setup.eq_touched = True
 
     def _invalidated(self, ltf: pd.DataFrame) -> bool:
         """The CRT idea is dead if price closes beyond the swept extreme."""

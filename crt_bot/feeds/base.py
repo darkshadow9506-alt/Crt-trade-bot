@@ -39,6 +39,10 @@ def build_feed(cfg: dict) -> DataFeed:
         from .binance import BinancePublicFeed
 
         return BinancePublicFeed(base_url=live.get("binance_base_url"))
+    if name == "toobit":
+        from .toobit import ToobitFeed
+
+        return ToobitFeed(base_url=live.get("toobit_base_url"))
     if name == "mt5":
         from .mt5 import MT5Feed
 
@@ -54,4 +58,4 @@ def build_feed(cfg: dict) -> DataFeed:
             path=live["csv_path"],
             start_index=live.get("csv_start_index", 0),
         )
-    raise ValueError(f"Unknown live.feed {name!r} (use binance / mt5 / csv)")
+    raise ValueError(f"Unknown live.feed {name!r} (use binance / toobit / mt5 / csv)")

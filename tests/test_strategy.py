@@ -94,6 +94,65 @@ def test_entry_long_emits_signal_with_crt_target():
     assert signal is not None
     assert signal.direction is Direction.LONG
     assert signal.take_profit == 112.0           # trend-aligned -> CRT extreme
+    assert signal.tp_mode == "crt_high"
     assert signal.stop_loss < 103.0              # below the pullback extreme
     assert signal.rr >= 1.5
     assert strat.state is SignalState.IN_TRADE
+
+
+def _counter_trend_setup(strat, ltf, eq_touched):
+    """Build a counter-trend LONG setup (bearish bias) targeting the 50%."""
+    crt = CRTRange(
+        direction=Direction.LONG,
+        high=120.0, low=100.0, swept_level=100.0,   # equilibrium = 110
+        range_candle_time=pd.Timestamp("2026-05-01 10:00", tz="UTC"),
+        manip_candle_time=pd.Timestamp("2026-05-01 11:00", tz="UTC"),
+    )
+    strat.setup = _Setup(
+        crt=crt,
+        direction=Direction.LONG,
+        htf_trend_aligned=False,        # bearish market, long signal
+        htf_bias=Direction.SHORT,
+        crt_time=crt.manip_candle_time,
+        fib_zone=(102.0, 104.0),
+        pullback_extreme=102.5,
+        choch_mtf_time=ltf.index[0] - pd.Timedelta(minutes=1),
+        choch_ltf_time=ltf.index[0],
+        eq_touched=eq_touched,
+    )
+    strat.state = SignalState.WAIT_LTF_ENTRY
+
+
+def _counter_trend_ltf():
+    rows = [
+        (102.5, 103.0, 102.0, 102.8),
+        (102.8, 104.5, 102.8, 104.2),
+        (104.2, 105.0, 103.5, 104.5),   # bullish FVG [103.0, 103.5]
+        (104.0, 104.2, 103.2, 104.0),   # retest -> entry; high stays below 50%
+    ]
+    return make_df(rows, start="2026-05-01 12:00", freq="1min")
+
+
+def test_counter_trend_targets_equilibrium_when_eq_not_touched():
+    strat = CRTStrategy(_params(min_rr=1.5))
+    ltf = _counter_trend_ltf()
+    _counter_trend_setup(strat, ltf, eq_touched=False)
+    now = ltf.index[-1] + pd.Timedelta(minutes=1)
+    signal = strat.update(now, ltf.iloc[0:0], ltf.iloc[0:0], ltf)
+
+    assert signal is not None
+    assert signal.take_profit == 110.0          # 50% of the 100-120 CRT range
+    assert signal.tp_mode == "equilibrium"
+    assert signal.market_bias == "bearish"
+
+
+def test_counter_trend_cancels_if_eq_already_touched():
+    strat = CRTStrategy(_params(min_rr=1.5))
+    ltf = _counter_trend_ltf()
+    _counter_trend_setup(strat, ltf, eq_touched=True)   # price already tagged 50%
+    now = ltf.index[-1] + pd.Timedelta(minutes=1)
+    signal = strat.update(now, ltf.iloc[0:0], ltf.iloc[0:0], ltf)
+
+    assert signal is None                        # whole setup cancelled
+    assert strat.state is SignalState.WAIT_CRT
+    assert strat.setup is None

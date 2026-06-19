@@ -26,7 +26,7 @@ class FakeNotifier:
         self.messages.append(text)
         return True
 
-    def send_signal(self, sig: Signal) -> bool:
+    def send_signal(self, sig: Signal, **kwargs) -> bool:
         self.signals.append(sig)
         return True
 

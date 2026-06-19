@@ -108,6 +108,9 @@ class Signal:
     tf_set: str
     reason: str = ""
     crt: Optional[CRTRange] = None
+    entry_trigger: str = ""        # "ifvg" | "fvg" | "cisd"
+    tp_mode: str = ""              # "crt_high" | "crt_low" | "equilibrium"
+    market_bias: str = ""          # "bullish" | "bearish" | "unclear"
 
     @property
     def risk(self) -> float:

@@ -14,6 +14,8 @@ from .core.session import Session
 from .core.timeframes import TFSet
 from .data.loader import load_csv
 from .feeds.base import build_feed
+from .feeds.cache import CachingFeed
+from .live.multi_runner import MultiRunner
 from .live.runner import LiveRunner
 from .notify.telegram import TelegramNotifier
 from .risk.risk_manager import RiskManager, RiskParams
@@ -61,32 +63,74 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_live(cfg: dict) -> LiveRunner:
-    live = cfg.get("live", {})
-    symbol = live.get("symbol") or cfg.get("symbol", "BTCUSDT")
-    cfg = {**cfg, "symbol": symbol}  # signals carry the live symbol
+def _resolve_symbols(live: dict, cfg: dict) -> list[str]:
+    symbols = live.get("symbols") or [live.get("symbol") or cfg.get("symbol", "BTCUSDT")]
+    if isinstance(symbols, str):
+        symbols = [symbols]
+    # de-dupe, keep order
+    seen, out = set(), []
+    for s in symbols:
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
 
-    tf_set = TFSet.from_config(cfg["tf_sets"], cfg["tf_set"])
-    session = Session.from_config(cfg.get("session", {}))
-    strategy = CRTStrategy(StrategyParams.from_config(cfg, tf_set, session))
-    feed = build_feed(cfg)
-    notifier = TelegramNotifier.from_config(cfg)
-    risk_cfg = cfg.get("risk", {})
-    return LiveRunner(
-        symbol=symbol,
-        feed=feed,
-        strategy=strategy,
-        tf_set=tf_set,
-        notifier=notifier,
-        htf_limit=live.get("htf_limit", 300),
-        mtf_limit=live.get("mtf_limit", 600),
-        ltf_limit=live.get("ltf_limit", 600),
-        send_trade_updates=live.get("send_trade_updates", True),
-        state_path=live.get("state_path"),
-        account_balance=risk_cfg.get("account_balance"),
-        risk_pct=risk_cfg.get("risk_per_trade_pct"),
-        session_name=cfg.get("session", {}).get("name"),
+
+def _resolve_tf_set_names(live: dict, cfg: dict) -> list[str]:
+    defs = cfg["tf_sets"]
+    tfs = live.get("tf_sets")
+    if tfs is None:
+        return [cfg.get("tf_set", next(iter(defs)))]
+    if tfs == "all" or tfs == ["all"]:
+        return list(defs.keys())
+    if isinstance(tfs, str):
+        return [tfs]
+    return list(tfs)
+
+
+def _build_live(cfg: dict) -> MultiRunner:
+    live = cfg.get("live", {})
+    symbols = _resolve_symbols(live, cfg)
+    names = _resolve_tf_set_names(live, cfg)
+
+    htf_l = live.get("htf_limit", 300)
+    mtf_l = live.get("mtf_limit", 600)
+    ltf_l = live.get("ltf_limit", 600)
+    feed = CachingFeed(
+        build_feed(cfg),
+        min_fetch=max(htf_l, mtf_l, ltf_l),
+        throttle=live.get("request_throttle", 0.0),
     )
+    notifier = TelegramNotifier.from_config(cfg)
+    session = Session.from_config(cfg.get("session", {}))
+    risk_cfg = cfg.get("risk", {})
+    state_dir = live.get("state_dir", "reports")
+    send_updates = live.get("send_trade_updates", True)
+    session_name = cfg.get("session", {}).get("name")
+
+    runners: list[LiveRunner] = []
+    for sym in symbols:
+        for name in names:
+            tf_set = TFSet.from_config(cfg["tf_sets"], name)
+            scfg = {**cfg, "symbol": sym}  # signals carry this symbol
+            strategy = CRTStrategy(StrategyParams.from_config(scfg, tf_set, session))
+            state_path = f"{state_dir}/live_state_{sym}_{name}.json" if state_dir else None
+            runners.append(LiveRunner(
+                symbol=sym,
+                feed=feed,
+                strategy=strategy,
+                tf_set=tf_set,
+                notifier=notifier,
+                htf_limit=htf_l,
+                mtf_limit=mtf_l,
+                ltf_limit=ltf_l,
+                send_trade_updates=send_updates,
+                state_path=state_path,
+                account_balance=risk_cfg.get("account_balance"),
+                risk_pct=risk_cfg.get("risk_per_trade_pct"),
+                session_name=session_name,
+            ))
+    return MultiRunner(runners, feed, notifier)
 
 
 def cmd_live(args: argparse.Namespace) -> int:

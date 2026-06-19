@@ -105,13 +105,51 @@ live:
   #   mt5     -> forex / metals / indices for prop firms (needs MT5 terminal)
   #   csv     -> offline replay of a CSV (for testing)
   feed: "csv"
-  symbol: "BTCUSDT"                  # EXACT feed symbol (Binance/Toobit: BTCUSDT; MT5: XAUUSD, ...)
-  poll_seconds: 30                   # how often to poll the feed (live feeds only)
+
+  # Scan MANY symbols at once. Use EXACT feed symbols. Symbols the feed doesn't
+  # list are auto-skipped with a one-time warning. Crypto majors live on
+  # Binance/Toobit; metals & indices (XAUUSDT, NAS100USDT, ...) live on Toobit
+  # or MT5 -- NOT on Binance spot.
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+    - "SOLUSDT"
+    # --- bigger watchlist: uncomment what your feed supports ---
+    # - "BNBUSDT"
+    # - "XRPUSDT"
+    # - "ADAUSDT"
+    # - "DOGEUSDT"
+    # - "AVAXUSDT"
+    # - "LINKUSDT"
+    # - "DOTUSDT"
+    # - "TRXUSDT"
+    # - "TONUSDT"
+    # - "LTCUSDT"
+    # - "BCHUSDT"
+    # - "NEARUSDT"
+    # - "APTUSDT"
+    # - "ARBUSDT"
+    # - "OPUSDT"
+    # - "INJUSDT"
+    # - "SUIUSDT"
+    # --- metals / indices (Toobit or MT5) ---
+    # - "XAUUSDT"        # gold
+    # - "XAGUSDT"        # silver
+    # - "NAS100USDT"     # Nasdaq 100
+    # - "US30USDT"       # Dow Jones
+    # - "SPX500USDT"     # S&P 500
+  symbol: "BTCUSDT"                  # fallback if 'symbols' is empty / single-symbol mode
+
+  # Which timeframe sets to run PER symbol: "all" (all three) or a list of names.
+  tf_sets: "all"                     # or e.g. ["1H-5min-1min", "4H-15min-5min"]
+
+  poll_seconds: 60                   # how often to poll (raise it when scanning many symbols)
+  request_throttle: 0.0              # seconds between API calls (raise if you hit rate limits)
   htf_limit: 300                     # candles fetched per timeframe
   mtf_limit: 600
   ltf_limit: 600
   send_trade_updates: true           # also message when a signal hits TP/SL
-  state_path: "reports/live_state.json"   # dedup + open-trade persistence across restarts
+  state_dir: "reports"               # per-symbol/per-set state files (dedup + restart safety)
 
   # csv replay feed:
   csv_path: "examples/sample_BTCUSD_1min.csv"

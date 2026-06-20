@@ -111,6 +111,7 @@ class Signal:
     entry_trigger: str = ""        # "ifvg" | "fvg" | "cisd"
     tp_mode: str = ""              # "crt_high" | "crt_low" | "equilibrium"
     market_bias: str = ""          # "bullish" | "bearish" | "unclear"
+    bias_basis: str = ""           # "HH+HL" | "LH+LL" | "MA"
 
     @property
     def risk(self) -> float:

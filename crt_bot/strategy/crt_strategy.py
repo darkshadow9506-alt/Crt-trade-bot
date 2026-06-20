@@ -31,7 +31,7 @@ from ..smc.cisd import detect_cisd
 from ..smc.fvg import find_fvgs, latest_entry_gap
 from ..smc.liquidity import detect_sweep
 from ..smc.order_block import find_order_blocks
-from ..smc.structure import last_choch, structure_events
+from ..smc.structure import last_choch, structure_events, swing_points
 
 
 @dataclass
@@ -111,6 +111,7 @@ class _Setup:
     htf_trend_aligned: bool
     crt_time: pd.Timestamp
     htf_bias: Direction | None = None
+    bias_basis: str = ""
     fib_zone: tuple[float, float] | None = None
     pullback_extreme: float | None = None   # deepest low (long) / high (short)
     choch_mtf_time: pd.Timestamp | None = None
@@ -238,13 +239,14 @@ class CRTStrategy:
         if not self._poi_confluence(htf, crt.direction, now):
             return
 
-        bias = self._htf_trend(htf)
+        bias, basis = self._htf_trend(htf)
         aligned = bias is crt.direction
         self.setup = _Setup(
             crt=crt,
             direction=crt.direction,
             htf_trend_aligned=aligned,
             htf_bias=bias,
+            bias_basis=basis,
             crt_time=crt.manip_candle_time,
             tags=["crt", "trend_aligned" if aligned else "counter_trend"],
         )
@@ -282,22 +284,37 @@ class CRTStrategy:
             return True
         return False
 
-    def _htf_trend(self, htf: pd.DataFrame) -> Direction | None:
-        """HTF market bias. Primary: latest BOS/CHoCH (market structure).
-        Fallback when structure is unresolved: last close vs its SMA."""
-        events = structure_events(htf, self.p.swing_lookback)
-        if events:
-            return events[-1].direction
+    def _htf_trend(self, htf: pd.DataFrame) -> tuple[Direction | None, str]:
+        """HTF market bias from real swing structure -- the way a trader reads
+        it by eye:
+
+        * higher highs **and** higher lows  -> bullish  ("HH+HL")
+        * lower highs  **and** lower lows    -> bearish  ("LH+LL")
+
+        When structure is mixed or there aren't enough swings yet, fall back to
+        a moving-average tiebreak ("MA"). Returns ``(direction, basis)``.
+        """
+        swings = swing_points(htf, self.p.swing_lookback)
+        highs = [s.price for s in swings if s.is_high]
+        lows = [s.price for s in swings if not s.is_high]
+        if len(highs) >= 2 and len(lows) >= 2:
+            hh, hl = highs[-1] > highs[-2], lows[-1] > lows[-2]
+            lh, ll = highs[-1] < highs[-2], lows[-1] < lows[-2]
+            if hh and hl:
+                return Direction.LONG, "HH+HL"
+            if lh and ll:
+                return Direction.SHORT, "LH+LL"
+
+        # mixed / not enough structure -> moving-average tiebreak
         closes = htf["close"]
-        if len(closes) < 3:
-            return None
-        sma = float(closes.tail(min(len(closes), 20)).mean())
-        last = float(closes.iloc[-1])
-        if last > sma:
-            return Direction.LONG
-        if last < sma:
-            return Direction.SHORT
-        return None
+        if len(closes) >= 3:
+            sma = float(closes.tail(min(len(closes), 50)).mean())
+            last = float(closes.iloc[-1])
+            if last > sma:
+                return Direction.LONG, "MA"
+            if last < sma:
+                return Direction.SHORT, "MA"
+        return None, ""
 
     # -- stage 2: MTF CHoCH + pullback ------------------------------------
     def _scan_mtf_choch(self, mtf: pd.DataFrame) -> None:
@@ -428,6 +445,7 @@ class CRTStrategy:
             entry_trigger=trigger,
             tp_mode=self.setup.tp_mode,
             market_bias=bias,
+            bias_basis=self.setup.bias_basis,
         )
 
         # sanity: correct side and acceptable reward:risk

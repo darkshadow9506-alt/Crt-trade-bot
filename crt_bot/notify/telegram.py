@@ -65,7 +65,8 @@ def format_signal(
         lines.append(f"📦 CRT range : {_fmt(s.crt.low)} – {_fmt(s.crt.high)}")
         lines.append(f"⚖️ 50% (eq)  : {_fmt(s.crt.equilibrium)}")
     if s.market_bias:
-        lines.append(f"📈 Market bias: <b>{s.market_bias.upper()}</b>")
+        basis = f" ({s.bias_basis})" if s.bias_basis else ""
+        lines.append(f"📈 Market bias: <b>{s.market_bias.upper()}</b>{basis}")
     if s.tp_mode:
         lines.append(f"🎯 TP rule   : {_TP_LABEL.get(s.tp_mode, s.tp_mode)}")
     if s.entry_trigger:

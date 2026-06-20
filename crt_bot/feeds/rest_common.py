@@ -3,11 +3,17 @@
 Both Binance and Toobit expose a public, key-less ``klines`` endpoint that
 returns an array of arrays whose first six elements are
 ``[openTime(ms), open, high, low, close, volume]``. This base class handles the
-request, parsing and dropping of the still-forming candle; subclasses only set
-the host and path.
+request, retries, parsing and dropping of the still-forming candle; subclasses
+only set the host and path.
+
+Transient failures (connection drops, timeouts, HTTP 429/5xx) are retried with
+exponential backoff so a brief VPN/network hiccup doesn't skip a symbol.
+Permanent failures (e.g. HTTP 400 for an unknown symbol) are not retried.
 """
 
 from __future__ import annotations
+
+import time
 
 import pandas as pd
 
@@ -45,9 +51,22 @@ class BinanceCompatFeed(DataFeed):
     klines_path = ""
     name = "binance-compat"
 
-    def __init__(self, base_url: str | None = None):
+    # transient HTTP statuses worth retrying
+    _RETRY_STATUS = {429, 500, 502, 503, 504}
+
+    def __init__(self, base_url: str | None = None, retries: int = 3, backoff: float = 0.6):
         if base_url:
             self.base_url = base_url.rstrip("/")
+        self.retries = max(1, retries)
+        self.backoff = backoff
+        self._session = None
+
+    def _get_session(self):
+        if self._session is None:
+            import requests
+
+            self._session = requests.Session()
+        return self._session
 
     def _interval(self, timeframe: str) -> str:
         try:
@@ -55,21 +74,32 @@ class BinanceCompatFeed(DataFeed):
         except KeyError as exc:
             raise ValueError(f"{self.name} feed cannot serve timeframe {timeframe!r}") from exc
 
-    def get_candles(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
-        try:
-            import requests
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("requests is required for REST feeds") from exc
+    def _request(self, url: str, params: dict):
+        """GET with retry/backoff on transient errors. Returns parsed JSON."""
+        import requests
 
+        session = self._get_session()
+        last_exc: Exception | None = None
+        for attempt in range(self.retries):
+            try:
+                resp = session.get(url, params=params, timeout=15)
+                if resp.status_code in self._RETRY_STATUS:
+                    last_exc = requests.HTTPError(f"{resp.status_code} {resp.reason}")
+                    time.sleep(self.backoff * (2 ** attempt))
+                    continue
+                resp.raise_for_status()  # permanent 4xx (e.g. bad symbol) -> raise, no retry
+                return resp.json()
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last_exc = exc
+                time.sleep(self.backoff * (2 ** attempt))
+        raise last_exc  # type: ignore[misc]
+
+    def get_candles(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
         interval = self._interval(timeframe)
-        resp = requests.get(
+        payload = self._request(
             f"{self.base_url}{self.klines_path}",
-            params={"symbol": symbol.upper(), "interval": interval,
-                    "limit": min(limit + 1, 1000)},
-            timeout=15,
+            {"symbol": symbol.upper(), "interval": interval, "limit": min(limit + 1, 1000)},
         )
-        resp.raise_for_status()
-        payload = resp.json()
         # some deployments wrap the array under data/result
         if isinstance(payload, dict):
             payload = payload.get("data") or payload.get("result") or []

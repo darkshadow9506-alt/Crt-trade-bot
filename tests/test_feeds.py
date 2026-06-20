@@ -63,3 +63,72 @@ def test_toobit_futures_symbol_conversion():
 def test_build_feed_toobit_futures_market():
     feed = build_feed({"live": {"feed": "toobit", "market": "futures"}})
     assert isinstance(feed, ToobitFeed) and feed.market == "futures"
+
+
+# -- retry / resilience -------------------------------------------------
+class _Resp:
+    def __init__(self, status=200, payload=None):
+        self.status_code = status
+        self.reason = "x"
+        self._payload = payload if payload is not None else []
+
+    def raise_for_status(self):
+        if 400 <= self.status_code < 600:
+            import requests
+
+            raise requests.HTTPError(str(self.status_code))
+
+    def json(self):
+        return self._payload
+
+
+class _Session:
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        item = self.script[min(self.calls, len(self.script) - 1)]
+        self.calls += 1
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+_ROWS = [
+    [1700000000000, "1", "2", "0.5", "1.5", "3"],
+    [1700000060000, "1.5", "2", "1", "1.8", "2"],
+]
+
+
+def _feed():
+    f = BinancePublicFeed()
+    f.backoff = 0  # no sleeping in tests
+    return f
+
+
+def test_retry_recovers_from_connection_error():
+    import requests
+
+    f = _feed()
+    f._session = _Session([requests.ConnectionError("boom"), _Resp(200, _ROWS)])
+    df = f.get_candles("BTCUSDT", "1H", 5)
+    assert len(df) == 1            # 2 rows minus the forming candle
+    assert f._session.calls == 2  # retried once then succeeded
+
+
+def test_retry_on_429_then_success():
+    f = _feed()
+    f._session = _Session([_Resp(429), _Resp(200, _ROWS)])
+    df = f.get_candles("BTCUSDT", "1H", 5)
+    assert len(df) == 1 and f._session.calls == 2
+
+
+def test_permanent_400_is_not_retried():
+    import pytest
+
+    f = _feed()
+    f._session = _Session([_Resp(400)])
+    with pytest.raises(Exception):
+        f.get_candles("BADUSDT", "1H", 5)
+    assert f._session.calls == 1   # bad symbol -> no pointless retries

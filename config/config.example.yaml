@@ -143,7 +143,8 @@ live:
   tf_sets: "all"                     # or e.g. ["1H-5min-1min", "4H-15min-5min"]
 
   poll_seconds: 60                   # how often to poll (raise it when scanning many symbols)
-  request_throttle: 0.0              # seconds between API calls (raise if you hit rate limits)
+  request_throttle: 0.2              # seconds between API calls; spaces out a big scan to avoid rate limits
+  # transient network errors (VPN blips, timeouts, 429) are retried automatically
   htf_limit: 300                     # candles fetched per timeframe
   mtf_limit: 600
   ltf_limit: 600

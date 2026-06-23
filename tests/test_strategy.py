@@ -7,13 +7,13 @@ import datetime as dt
 import pandas as pd
 
 from crt_bot.core.models import CRTRange, Direction, SignalState
-from crt_bot.core.session import Session
+from crt_bot.core.session import SessionSet
 from crt_bot.core.timeframes import TFSet
 from crt_bot.strategy.crt_strategy import CRTStrategy, StrategyParams, _Setup
 
 from .util import make_df
 
-_NO_SESSION = Session(False, "x", "UTC", dt.time(0), dt.time(23, 59))
+_NO_SESSION = SessionSet(enabled=False)
 _TF = TFSet("1H", "5min", "1min")
 
 
@@ -21,7 +21,7 @@ def _params(**kw) -> StrategyParams:
     base = dict(
         symbol="X",
         tf_set=_TF,
-        session=_NO_SESSION,
+        sessions=_NO_SESSION,
         use_fvg=True,
         use_order_block=False,
         use_liquidity_sweep=False,

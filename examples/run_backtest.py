@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crt_bot.backtest.engine import Backtester, Costs
 from crt_bot.backtest.report import build_report, print_report
 from crt_bot.config import load_config
-from crt_bot.core.session import Session
+from crt_bot.core.session import SessionSet
 from crt_bot.core.timeframes import TFSet
 from crt_bot.data.loader import load_csv
 from crt_bot.risk.risk_manager import RiskManager, RiskParams
@@ -30,8 +30,8 @@ def main() -> None:
     for set_name in cfg["tf_sets"]:
         cfg["tf_set"] = set_name
         tf_set = TFSet.from_config(cfg["tf_sets"], set_name)
-        session = Session.from_config(cfg.get("session", {}))
-        strategy = CRTStrategy(StrategyParams.from_config(cfg, tf_set, session))
+        sessions = SessionSet.from_config(cfg.get("session", {}))
+        strategy = CRTStrategy(StrategyParams.from_config(cfg, tf_set, sessions))
         risk = RiskManager(RiskParams.from_config(cfg))
         bt = Backtester(strategy, risk, tf_set, cfg["base_timeframe"], Costs.from_config(cfg))
         result = bt.run(df)

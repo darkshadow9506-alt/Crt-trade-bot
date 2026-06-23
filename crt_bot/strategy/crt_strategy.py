@@ -23,7 +23,7 @@ import pandas as pd
 
 from ..core.indicators import last_atr
 from ..core.models import CRTRange, Direction, Signal, SignalState
-from ..core.session import Session
+from ..core.session import SessionSet
 from ..core.timeframes import TFSet
 from ..smc import crt as crt_mod
 from ..smc import fib as fib_mod
@@ -38,7 +38,7 @@ from ..smc.structure import last_choch, structure_events, swing_points
 class StrategyParams:
     symbol: str
     tf_set: TFSet
-    session: Session
+    sessions: SessionSet
 
     # POI
     use_fvg: bool = True
@@ -73,7 +73,7 @@ class StrategyParams:
     ltf_entry_timeout: int = 40
 
     @classmethod
-    def from_config(cls, cfg: dict, tf_set: TFSet, session: Session) -> "StrategyParams":
+    def from_config(cls, cfg: dict, tf_set: TFSet, sessions: SessionSet) -> "StrategyParams":
         s = cfg.get("strategy", {})
         poi = s.get("poi", {})
         crt = s.get("crt", {})
@@ -83,7 +83,7 @@ class StrategyParams:
         return cls(
             symbol=cfg.get("symbol", "UNKNOWN"),
             tf_set=tf_set,
-            session=session,
+            sessions=sessions,
             use_fvg=poi.get("use_fvg", True),
             use_order_block=poi.get("use_order_block", True),
             use_liquidity_sweep=poi.get("use_liquidity_sweep", True),
@@ -221,7 +221,7 @@ class CRTStrategy:
 
     # -- stage 1: HTF POI + CRT -------------------------------------------
     def _scan_htf(self, now: pd.Timestamp, htf: pd.DataFrame, ltf: pd.DataFrame) -> None:
-        if self.p.session.enabled and not self.p.session.contains(now):
+        if self.p.sessions.enabled and not self.p.sessions.contains(now):
             return
         if len(htf) < 3:
             return
@@ -265,7 +265,7 @@ class CRTStrategy:
         last = htf.iloc[-1]
 
         if self.p.use_liquidity_sweep:
-            sweep = detect_sweep(htf, self.p.session, now, self.p.lookback_sessions)
+            sweep = detect_sweep(htf, self.p.sessions, now, self.p.lookback_sessions)
             if sweep is not None and sweep.direction is direction:
                 return True
 
@@ -446,6 +446,7 @@ class CRTStrategy:
             tp_mode=self.setup.tp_mode,
             market_bias=bias,
             bias_basis=self.setup.bias_basis,
+            session=self.p.sessions.active_name(now) or "",
         )
 
         # sanity: correct side and acceptable reward:risk

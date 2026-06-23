@@ -10,7 +10,7 @@ from . import __version__
 from .backtest.engine import Backtester, Costs
 from .backtest.report import build_report, print_report, report_to_dict
 from .config import load_config
-from .core.session import Session
+from .core.session import SessionSet
 from .core.timeframes import TFSet
 from .data.loader import load_csv
 from .feeds.base import build_feed
@@ -24,8 +24,8 @@ from .strategy.crt_strategy import CRTStrategy, StrategyParams
 
 def _build(cfg: dict):
     tf_set = TFSet.from_config(cfg["tf_sets"], cfg["tf_set"])
-    session = Session.from_config(cfg.get("session", {}))
-    strat_params = StrategyParams.from_config(cfg, tf_set, session)
+    sessions = SessionSet.from_config(cfg.get("session", {}))
+    strat_params = StrategyParams.from_config(cfg, tf_set, sessions)
     strategy = CRTStrategy(strat_params)
     risk = RiskManager(RiskParams.from_config(cfg))
     costs = Costs.from_config(cfg)
@@ -102,18 +102,19 @@ def _build_live(cfg: dict) -> MultiRunner:
         throttle=live.get("request_throttle", 0.0),
     )
     notifier = TelegramNotifier.from_config(cfg)
-    session = Session.from_config(cfg.get("session", {}))
+    sessions = SessionSet.from_config(cfg.get("session", {}))
     risk_cfg = cfg.get("risk", {})
     state_dir = live.get("state_dir", "reports")
     send_updates = live.get("send_trade_updates", True)
-    session_name = cfg.get("session", {}).get("name")
+    # the signal carries the actual active session; this is just a fallback label
+    session_name = None
 
     runners: list[LiveRunner] = []
     for sym in symbols:
         for name in names:
             tf_set = TFSet.from_config(cfg["tf_sets"], name)
             scfg = {**cfg, "symbol": sym}  # signals carry this symbol
-            strategy = CRTStrategy(StrategyParams.from_config(scfg, tf_set, session))
+            strategy = CRTStrategy(StrategyParams.from_config(scfg, tf_set, sessions))
             state_path = f"{state_dir}/live_state_{sym}_{name}.json" if state_dir else None
             runners.append(LiveRunner(
                 symbol=sym,

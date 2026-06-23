@@ -39,7 +39,8 @@ def format_signal(
     s = signal
     head = "🟢 LONG" if s.direction.value == "long" else "🔴 SHORT"
     tf = s.tf_set.replace("-", " ▸ ")
-    sess = f"  ·  {session_name} session" if session_name else ""
+    sname = s.session or session_name
+    sess = f"  ·  {sname} session" if sname else ""
 
     lines = [
         f"<b>{head}  {s.symbol}</b>",

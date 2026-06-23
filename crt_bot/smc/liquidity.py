@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..core.models import Direction
-from ..core.session import Session
+from ..core.session import SessionSet
 
 
 @dataclass
@@ -30,7 +30,7 @@ class Sweep:
 
 
 def prior_session_levels(
-    df: pd.DataFrame, session: Session, now: pd.Timestamp, lookback_sessions: int = 3
+    df: pd.DataFrame, session: SessionSet, now: pd.Timestamp, lookback_sessions: int = 3
 ) -> list[LiquidityLevel]:
     """Highs/lows of the ``lookback_sessions`` sessions before ``now``'s session."""
     if df.empty:
@@ -54,7 +54,7 @@ def prior_session_levels(
 
 def detect_sweep(
     df: pd.DataFrame,
-    session: Session,
+    session: SessionSet,
     now: pd.Timestamp,
     lookback_sessions: int = 3,
 ) -> Sweep | None:

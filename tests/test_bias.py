@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from crt_bot.core.models import Direction
-from crt_bot.core.session import Session
+from crt_bot.core.session import SessionSet
 from crt_bot.core.timeframes import TFSet
 from crt_bot.strategy.crt_strategy import CRTStrategy, StrategyParams
 
 from .util import make_df
 
 _TF = TFSet("1H", "5min", "1min")
-_SESS = Session(False, "x", "UTC", __import__("datetime").time(0), __import__("datetime").time(23, 59))
+_SESS = SessionSet(enabled=False)
 
 
 def _strat(lookback=1):
-    return CRTStrategy(StrategyParams(symbol="X", tf_set=_TF, session=_SESS, swing_lookback=lookback))
+    return CRTStrategy(StrategyParams(symbol="X", tf_set=_TF, sessions=_SESS, swing_lookback=lookback))
 
 
 def test_bias_bullish_hh_hl():

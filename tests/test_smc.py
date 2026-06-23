@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from crt_bot.core.models import Direction
-from crt_bot.core.session import Session
+from crt_bot.core.session import Session, SessionSet
 from crt_bot.smc.cisd import detect_cisd
 from crt_bot.smc.crt import detect_crt
 from crt_bot.smc.fib import fib_pullback_zone
@@ -145,8 +145,8 @@ def test_liquidity_sweep_long():
         (103, 105, 85, 95),      # current candle sweeps 90 and closes back above
     ]
     df = make_df_at(times, rows)
-    session = Session(True, "ny", "America/New_York", __import__("datetime").time(8),
-                      __import__("datetime").time(16))
+    session = SessionSet(True, [Session("ny", "America/New_York",
+                                        __import__("datetime").time(8), __import__("datetime").time(16))])
     sweep = detect_sweep(df, session, df.index[-1], lookback_sessions=3)
     assert sweep is not None
     assert sweep.direction is Direction.LONG and sweep.level == 90

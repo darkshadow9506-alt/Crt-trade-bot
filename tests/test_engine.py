@@ -6,7 +6,7 @@ import pandas as pd
 
 from crt_bot.backtest.engine import Backtester, Costs
 from crt_bot.core.models import Direction, Signal, Trade, TradeStatus
-from crt_bot.core.session import Session
+from crt_bot.core.session import SessionSet
 from crt_bot.core.timeframes import TFSet
 from crt_bot.risk.risk_manager import RiskManager, RiskParams
 from crt_bot.strategy.crt_strategy import CRTStrategy, StrategyParams
@@ -14,9 +14,8 @@ from crt_bot.strategy.crt_strategy import CRTStrategy, StrategyParams
 
 def _bt() -> Backtester:
     tf_set = TFSet("1H", "5min", "1min")
-    session = Session(False, "x", "UTC", __import__("datetime").time(0),
-                      __import__("datetime").time(23, 59))
-    strat = CRTStrategy(StrategyParams(symbol="X", tf_set=tf_set, session=session))
+    sessions = SessionSet(enabled=False)
+    strat = CRTStrategy(StrategyParams(symbol="X", tf_set=tf_set, sessions=sessions))
     risk = RiskManager(RiskParams())
     return Backtester(strat, risk, tf_set, "1min", Costs())
 

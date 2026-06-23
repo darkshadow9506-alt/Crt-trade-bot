@@ -19,15 +19,15 @@ tf_sets:
   "4H-15min-5min": { htf: "4H",  mtf: "15min", ltf: "5min"  }
   "1H-5min-1min":  { htf: "1H",  mtf: "5min",  ltf: "1min"  }
 
-# --- Trading session (only look for setups inside this window) ---------
+# --- Trading sessions (hunt setups inside ANY of these windows) --------
+# Each session is checked in its own timezone. A setup is allowed if price is
+# inside any one of them. Comment out the ones you don't want.
 session:
   enabled: true
-  name: "new_york"
-  # Times are in the timezone below. NY open killzone by default.
-  timezone: "America/New_York"
-  start: "08:00"     # start hunting for HTF POI after this
-  end: "16:00"       # stop opening new trades after this
-  # also accept the "london" overlap if you want; leave one session for now
+  sessions:
+    - { name: "asia",     timezone: "Asia/Tokyo",       start: "09:00", end: "15:00" }
+    - { name: "london",   timezone: "Europe/London",    start: "07:00", end: "16:00" }
+    - { name: "new_york", timezone: "America/New_York", start: "08:00", end: "17:00" }
 
 # --- Strategy parameters ----------------------------------------------
 strategy:

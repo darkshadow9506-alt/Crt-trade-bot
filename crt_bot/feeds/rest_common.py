@@ -54,7 +54,7 @@ class BinanceCompatFeed(DataFeed):
     # transient HTTP statuses worth retrying
     _RETRY_STATUS = {429, 500, 502, 503, 504}
 
-    def __init__(self, base_url: str | None = None, retries: int = 3, backoff: float = 0.6):
+    def __init__(self, base_url: str | None = None, retries: int = 4, backoff: float = 0.6):
         if base_url:
             self.base_url = base_url.rstrip("/")
         self.retries = max(1, retries)
@@ -75,21 +75,30 @@ class BinanceCompatFeed(DataFeed):
             raise ValueError(f"{self.name} feed cannot serve timeframe {timeframe!r}") from exc
 
     def _request(self, url: str, params: dict):
-        """GET with retry/backoff on transient errors. Returns parsed JSON."""
+        """GET with retry/backoff on transient errors. Returns parsed JSON.
+
+        Retries connection resets, timeouts, chunked/incomplete reads
+        ("IncompleteRead", "Response ended prematurely"), truncated bodies and
+        429/5xx. Does NOT retry a permanent 4xx (e.g. unknown symbol).
+        """
         import requests
 
         session = self._get_session()
         last_exc: Exception | None = None
         for attempt in range(self.retries):
             try:
-                resp = session.get(url, params=params, timeout=15)
+                resp = session.get(url, params=params, timeout=20)
                 if resp.status_code in self._RETRY_STATUS:
                     last_exc = requests.HTTPError(f"{resp.status_code} {resp.reason}")
                     time.sleep(self.backoff * (2 ** attempt))
                     continue
-                resp.raise_for_status()  # permanent 4xx (e.g. bad symbol) -> raise, no retry
+                resp.raise_for_status()  # 4xx -> HTTPError (handled below, no retry)
                 return resp.json()
-            except (requests.ConnectionError, requests.Timeout) as exc:
+            except requests.HTTPError:
+                raise  # permanent client error (e.g. bad symbol) -> don't retry
+            except (requests.RequestException, ValueError) as exc:
+                # transient: connection reset, timeout, incomplete/chunked read,
+                # truncated JSON body, etc.
                 last_exc = exc
                 time.sleep(self.backoff * (2 ** attempt))
         raise last_exc  # type: ignore[misc]

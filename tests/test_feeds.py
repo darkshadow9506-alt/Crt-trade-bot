@@ -124,6 +124,19 @@ def test_retry_on_429_then_success():
     assert len(df) == 1 and f._session.calls == 2
 
 
+def test_retry_on_incomplete_read():
+    import requests
+
+    f = _feed()
+    # mid-stream connection break ("IncompleteRead" / "Response ended prematurely")
+    f._session = _Session([
+        requests.exceptions.ChunkedEncodingError("Connection broken: IncompleteRead"),
+        _Resp(200, _ROWS),
+    ])
+    df = f.get_candles("BTCUSDT", "1H", 5)
+    assert len(df) == 1 and f._session.calls == 2
+
+
 def test_permanent_400_is_not_retried():
     import pytest
 

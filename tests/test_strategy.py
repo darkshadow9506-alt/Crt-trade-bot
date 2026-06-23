@@ -156,3 +156,42 @@ def test_counter_trend_cancels_if_eq_already_touched():
     assert signal is None                        # whole setup cancelled
     assert strat.state is SignalState.WAIT_CRT
     assert strat.setup is None
+
+
+def test_entry_short_emits_signal_with_crt_low_target():
+    """Mirror of the LONG case: a trend-aligned SHORT targets the CRT Low."""
+    strat = CRTStrategy(_params(min_rr=1.5))
+    rows = [
+        (118.0, 118.5, 117.0, 117.5),
+        (117.5, 117.5, 115.0, 115.5),
+        (115.5, 115.8, 114.0, 114.5),   # bearish FVG [115.8, 117.0]
+        (115.9, 116.5, 115.5, 116.0),   # retest -> entry trigger
+    ]
+    ltf = make_df(rows, start="2026-05-01 12:00", freq="1min")
+    empty = ltf.iloc[0:0]
+
+    crt = CRTRange(
+        direction=Direction.SHORT, high=120.0, low=100.0, swept_level=120.0,
+        range_candle_time=pd.Timestamp("2026-05-01 10:00", tz="UTC"),
+        manip_candle_time=pd.Timestamp("2026-05-01 11:00", tz="UTC"),
+    )
+    strat.setup = _Setup(
+        crt=crt, direction=Direction.SHORT, htf_trend_aligned=True,   # bearish market
+        htf_bias=Direction.SHORT, crt_time=crt.manip_candle_time,
+        fib_zone=(116.0, 118.0), pullback_extreme=117.0,
+        choch_mtf_time=ltf.index[0] - pd.Timedelta(minutes=1), choch_ltf_time=ltf.index[0],
+    )
+    strat.state = SignalState.WAIT_LTF_ENTRY
+
+    now = ltf.index[-1] + pd.Timedelta(minutes=1)
+    sig = strat.update(now, empty, empty, ltf)
+
+    assert sig is not None
+    assert sig.direction is Direction.SHORT
+    assert sig.take_profit == 100.0              # trend-aligned short -> CRT Low
+    assert sig.tp_mode == "crt_low"
+    assert sig.market_bias == "bearish"
+    assert sig.stop_loss > 117.0                 # above the pullback extreme
+    assert sig.take_profit < sig.entry < sig.stop_loss
+    assert sig.rr >= 1.5
+    assert strat.state is SignalState.IN_TRADE

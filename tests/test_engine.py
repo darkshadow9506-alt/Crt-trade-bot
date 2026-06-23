@@ -64,3 +64,35 @@ def test_no_touch_keeps_open():
     now = pd.Timestamp("2026-05-01 00:05", tz="UTC")
     assert bt._try_close(tr, _bar(high=109, low=96), now) is False
     assert tr.status is TradeStatus.OPEN
+
+
+def _short_trade(entry=100.0, sl=105.0, tp=90.0, size=10.0):
+    sig = Signal("X", Direction.SHORT, entry, sl, tp,
+                 pd.Timestamp("2026-05-01", tz="UTC"), "t")
+    return Trade(signal=sig, size=size, entry_time=sig.time, entry_price=entry)
+
+
+def test_short_hits_take_profit():
+    bt = _bt()
+    tr = _short_trade()
+    now = pd.Timestamp("2026-05-01 00:05", tz="UTC")
+    assert bt._try_close(tr, _bar(high=101, low=89), now) is True
+    assert tr.status is TradeStatus.WIN
+    assert tr.pnl == 10 * (90 - 100) * -1      # +100
+
+
+def test_short_hits_stop():
+    bt = _bt()
+    tr = _short_trade()
+    now = pd.Timestamp("2026-05-01 00:05", tz="UTC")
+    assert bt._try_close(tr, _bar(high=106, low=99), now) is True
+    assert tr.status is TradeStatus.LOSS
+    assert tr.pnl == 10 * (105 - 100) * -1     # -50
+
+
+def test_short_stop_wins_ties():
+    bt = _bt()
+    tr = _short_trade()
+    now = pd.Timestamp("2026-05-01 00:05", tz="UTC")
+    assert bt._try_close(tr, _bar(high=106, low=89), now) is True
+    assert tr.status is TradeStatus.LOSS       # both touched -> stop first

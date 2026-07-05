@@ -39,7 +39,7 @@ def _arm_long(strat: CRTStrategy, ltf: pd.DataFrame) -> None:
     strat.setup = _Setup(
         crt=crt, direction=Direction.LONG, htf_trend_aligned=True,
         htf_bias=Direction.LONG, crt_time=crt.manip_candle_time,
-        fib_zone=(102.0, 104.0), pullback_extreme=103.0,
+        fib_zone=(102.0, 104.0), pullback_extreme=103.0, mtf_fib_extreme=103.0,
         choch_mtf_time=ltf.index[0] - pd.Timedelta(minutes=1),
         choch_ltf_time=ltf.index[0],
     )
@@ -82,8 +82,29 @@ def test_bos_long_full_sequence():
     assert sig.direction is Direction.LONG
     assert sig.entry == 106.6                    # the BOS close
     assert sig.take_profit == 112.0              # trend-aligned -> CRT High
-    assert sig.stop_loss <= 103.0                # beyond the pullback extreme
+    # SL anchor "ltf_pullback": lowest low AFTER the LTF CHoCH bar (b1 104.9)
+    assert sig.stop_loss == 104.9
     assert strat.state is SignalState.IN_TRADE
+
+
+def test_bos_sl_anchor_mtf_fib():
+    strat = _bos_strat(sl_anchor="mtf_fib")
+    ltf = make_df(_LONG_ROWS, start="2026-05-01 12:00", freq="1min")
+    _arm_long(strat, ltf)
+    sig = _drive(strat, ltf)
+    assert sig is not None
+    # anchored at the MTF candle that tagged the fib zone
+    assert sig.stop_loss == 103.0
+
+
+def test_bos_sl_anchor_deepest():
+    strat = _bos_strat(sl_anchor="deepest")
+    ltf = make_df(_LONG_ROWS, start="2026-05-01 12:00", freq="1min")
+    _arm_long(strat, ltf)
+    sig = _drive(strat, ltf)
+    assert sig is not None
+    # deeper of (ltf pullback 104.9, mtf fib 103.0) -> 103.0
+    assert sig.stop_loss == 103.0
 
 
 def test_bos_requires_pullback_first():
@@ -142,7 +163,7 @@ def test_bos_short_full_sequence():
     strat.setup = _Setup(
         crt=crt, direction=Direction.SHORT, htf_trend_aligned=True,
         htf_bias=Direction.SHORT, crt_time=crt.manip_candle_time,
-        fib_zone=(115.0, 117.0), pullback_extreme=116.5,
+        fib_zone=(115.0, 117.0), pullback_extreme=116.5, mtf_fib_extreme=116.5,
         choch_mtf_time=ltf.index[0] - pd.Timedelta(minutes=1),
         choch_ltf_time=ltf.index[0],
     )
@@ -155,5 +176,6 @@ def test_bos_short_full_sequence():
     assert sig.direction is Direction.SHORT
     assert sig.entry == 113.4
     assert sig.take_profit == 104.0              # trend-aligned short -> CRT Low
-    assert sig.stop_loss >= 116.5
+    # SL anchor "ltf_pullback": highest high AFTER the CHoCH bar (b1 115.1)
+    assert sig.stop_loss == 115.1
     assert strat.state is SignalState.IN_TRADE

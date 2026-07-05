@@ -30,6 +30,8 @@ def _params(**kw) -> StrategyParams:
         # these tests exercise the TP/entry construction directly on the tag
         # bar; BOS-mode sequencing has its own tests in test_bos_entry.py
         entry_mode="retest",
+        # the stage-1 fixture has too little data for clean swing structure
+        require_clear_bias=False,
     )
     base.update(kw)
     return StrategyParams(**base)
@@ -56,6 +58,27 @@ def test_stage1_htf_crt_with_poi_transitions():
     assert strat.setup is not None
     assert strat.setup.crt.direction is Direction.LONG
     assert strat.setup.crt.high == 112 and strat.setup.crt.low == 104
+
+
+def test_unclear_bias_blocks_setup_when_required():
+    """"If we're not sure, don't signal": with require_clear_bias on, the same
+    frame (whose bias comes from the MA tiebreak, not clean structure) must
+    NOT produce a setup."""
+    rows = [
+        (100, 101, 99, 100),
+        (100, 102, 99.5, 101),
+        (101, 108, 101, 107),
+        (107, 110, 106, 109),
+        (109, 112, 104, 105),
+        (105, 107, 101, 105.5),
+    ]
+    htf = make_df(rows)
+    empty = htf.iloc[0:0]
+    strat = CRTStrategy(_params(require_clear_bias=True))
+    now = htf.index[-1] + pd.Timedelta(hours=1)
+    strat.update(now, htf, empty, empty)
+    assert strat.state is SignalState.WAIT_CRT
+    assert strat.setup is None
 
 
 def test_entry_long_emits_signal_with_crt_target():

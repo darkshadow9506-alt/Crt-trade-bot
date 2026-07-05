@@ -58,8 +58,11 @@ class StrategyParams:
     require_close_inside: bool = True
     min_wick_sweep_atr: float = 0.05
 
-    # structure
+    # structure / bias
     swing_lookback: int = 2
+    # "if we're not sure, don't signal": only trade when the HTF bias comes
+    # from clean swing structure (HH+HL / LH+LL), not the MA tiebreak.
+    require_clear_bias: bool = True
 
     # fib
     pullback_min: float = 0.618
@@ -73,8 +76,14 @@ class StrategyParams:
     entry_mode: str = "bos"
     use_ifvg: bool = True
     use_cisd: bool = True
+    # SL anchor for BOS entries:
+    #   "ltf_pullback" -> below the lowest candle of the pullback AFTER the
+    #                     LTF CHoCH (tight; the user's primary rule)
+    #   "mtf_fib"      -> below the MTF candle that tagged the fib zone
+    #   "deepest"      -> the deeper of the two (most conservative)
+    sl_anchor: str = "ltf_pullback"
     sl_padding_atr: float = 0.1
-    min_rr: float = 1.5
+    min_rr: float = 2.0
 
     # stage timeouts (in bars of the relevant TF)
     mtf_choch_timeout: int = 24
@@ -103,6 +112,7 @@ class StrategyParams:
             require_close_inside=crt.get("require_close_inside", True),
             min_wick_sweep_atr=crt.get("min_wick_sweep_atr", 0.05),
             swing_lookback=struct.get("swing_lookback", 2),
+            require_clear_bias=s.get("bias", {}).get("require_structure", True),
             pullback_min=fib.get("pullback_min", 0.618),
             pullback_max=fib.get("pullback_max", 0.786),
             equilibrium_level=fib.get("equilibrium_level", 0.5),
@@ -110,8 +120,9 @@ class StrategyParams:
             entry_mode=entry.get("mode", "bos"),
             use_ifvg=entry.get("use_ifvg", True),
             use_cisd=entry.get("use_cisd", True),
+            sl_anchor=entry.get("sl_anchor", "ltf_pullback"),
             sl_padding_atr=entry.get("sl_padding_atr", 0.1),
-            min_rr=entry.get("min_rr", 1.5),
+            min_rr=entry.get("min_rr", 2.0),
         )
 
 
@@ -127,6 +138,7 @@ class _Setup:
     bias_basis: str = ""
     fib_zone: tuple[float, float] | None = None
     pullback_extreme: float | None = None   # deepest low (long) / high (short)
+    mtf_fib_extreme: float | None = None    # extreme of the MTF candle that tagged the fib
     choch_mtf_time: pd.Timestamp | None = None
     pullback_time: pd.Timestamp | None = None   # when the MTF fib zone was tagged
     choch_ltf_time: pd.Timestamp | None = None
@@ -258,6 +270,9 @@ class CRTStrategy:
             return
 
         bias, basis = self._htf_trend(htf)
+        # "not sure -> don't trade": demand a clean structural bias
+        if self.p.require_clear_bias and basis not in ("HH+HL", "LH+LL"):
+            return
         aligned = bias is crt.direction
         self.setup = _Setup(
             crt=crt,
@@ -401,6 +416,7 @@ class CRTStrategy:
             self.setup.pullback_extreme = float(last["low"])
         else:
             self.setup.pullback_extreme = float(last["high"])
+        self.setup.mtf_fib_extreme = self.setup.pullback_extreme
         self.setup.pullback_time = mtf.index[-1]
         self.setup.bars_in_state = 0
         self.state = SignalState.WAIT_LTF_CHOCH
@@ -462,7 +478,10 @@ class CRTStrategy:
         entry = float(last["close"])
         atr_v = last_atr(ltf)
         pad = self.p.sl_padding_atr * atr_v
-        extreme = self.setup.pullback_extreme
+        if self.p.entry_mode == "bos":
+            extreme = self._sl_anchor(ltf, direction)
+        else:
+            extreme = self.setup.pullback_extreme
         if extreme is None:
             extreme = float(last["low"] if direction is Direction.LONG else last["high"])
 
@@ -579,6 +598,37 @@ class CRTStrategy:
         return None
 
     # -- shared ------------------------------------------------------------
+    def _sl_anchor(self, ltf: pd.DataFrame, direction: Direction) -> float | None:
+        """SL anchor for a BOS entry, per the trader's rule.
+
+        * ``ltf_pullback`` -- extreme of the pullback after the LTF CHoCH
+          (lowest low for a long / highest high for a short)
+        * ``mtf_fib``      -- extreme of the MTF candle that tagged the fib zone
+        * ``deepest``      -- the deeper of the two (fallback when data for the
+          preferred anchor is missing)
+        """
+        s = self.setup
+        assert s is not None
+        ltf_ext: float | None = None
+        if s.choch_ltf_time is not None:
+            after = ltf[ltf.index > s.choch_ltf_time]
+            if not after.empty:
+                ltf_ext = (
+                    float(after["low"].min()) if direction is Direction.LONG
+                    else float(after["high"].max())
+                )
+        mtf_ext = s.mtf_fib_extreme
+
+        if self.p.sl_anchor == "ltf_pullback" and ltf_ext is not None:
+            return ltf_ext
+        if self.p.sl_anchor == "mtf_fib" and mtf_ext is not None:
+            return mtf_ext
+        # "deepest" or fallback when the preferred anchor is unavailable
+        candidates = [x for x in (ltf_ext, mtf_ext, s.pullback_extreme) if x is not None]
+        if not candidates:
+            return None
+        return min(candidates) if direction is Direction.LONG else max(candidates)
+
     def _extend_extreme(self, last: pd.Series) -> None:
         assert self.setup is not None
         if self.setup.pullback_extreme is None:

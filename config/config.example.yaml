@@ -52,6 +52,11 @@ strategy:
   structure:
     swing_lookback: 2                # fractal strength (bars each side) for swing points
 
+  # "If we're not sure, don't signal": require the HTF bias to come from clean
+  # swing structure (HH+HL / LH+LL). Mixed / unclear structure = no setup.
+  bias:
+    require_structure: true
+
   # Pullback retracement zone on MTF (your 0.61 - 0.78 OTE-deep zone).
   fib:
     pullback_min: 0.618
@@ -73,11 +78,15 @@ strategy:
     mode: "bos"
     use_ifvg: true
     use_cisd: true
-    # Stop loss is placed beyond the pullback extreme (the candle that first
-    # tagged the fib zone), padded by this many ATR.
-    sl_padding_atr: 0.1
-    # Minimum reward:risk to accept a trade.
-    min_rr: 1.5
+    # Where the stop goes (BOS entries):
+    #   ltf_pullback -> below/above the extreme of the pullback AFTER the LTF
+    #                   CHoCH (the trader's primary rule)
+    #   mtf_fib      -> below/above the MTF candle that tagged the fib zone
+    #   deepest      -> the deeper of the two (most conservative)
+    sl_anchor: "ltf_pullback"
+    sl_padding_atr: 0.1              # extra ATR padding beyond the anchor
+    # Minimum reward:risk to accept a trade ("only signal when RR is good").
+    min_rr: 2.0
 
 # --- Risk management / prop-firm rules ---------------------------------
 risk:

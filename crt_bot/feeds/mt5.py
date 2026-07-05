@@ -79,6 +79,13 @@ class MT5Feed(DataFeed):
             raise ValueError(f"MT5 feed cannot serve timeframe {timeframe!r}")
         return getattr(mt5, name)
 
+    @staticmethod
+    def _clamp_offset(hours: float) -> float:
+        """Real broker offsets live in [-12, +14]. Anything outside means the
+        detection tick was stale (e.g. weekend, market closed) -- in that case
+        trust UTC rather than shifting candles by days."""
+        return hours if -12.0 <= hours <= 14.0 else 0.0
+
     def _offset_hours(self, mt5, symbol: str) -> float:
         """Broker server-time offset from UTC, in hours."""
         if isinstance(self.utc_offset, (int, float)):
@@ -91,7 +98,8 @@ class MT5Feed(DataFeed):
             else:
                 # tick.time is the server wall-clock encoded as an epoch;
                 # its distance from real UTC now = the server's UTC offset.
-                self._detected_offset = float(round((ts - _time.time()) / 3600.0))
+                raw = float(round((ts - _time.time()) / 3600.0))
+                self._detected_offset = self._clamp_offset(raw)
         return self._detected_offset
 
     def get_candles(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:

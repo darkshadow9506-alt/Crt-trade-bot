@@ -128,6 +128,7 @@ class _Setup:
     fib_zone: tuple[float, float] | None = None
     pullback_extreme: float | None = None   # deepest low (long) / high (short)
     choch_mtf_time: pd.Timestamp | None = None
+    pullback_time: pd.Timestamp | None = None   # when the MTF fib zone was tagged
     choch_ltf_time: pd.Timestamp | None = None
     eq_touched: bool = False                # did price reach the 50% before entry?
     # BOS entry mode: the CHoCH leg's extreme is the BOS reference level; a
@@ -394,11 +395,13 @@ class CRTStrategy:
         if not tagged:
             return
 
-        # record the pullback extreme (deepest point so far)
+        # record the pullback extreme (deepest point so far) and WHEN the fib
+        # got tagged -- the LTF CHoCH (step 6) must come after this moment
         if self.setup.direction is Direction.LONG:
             self.setup.pullback_extreme = float(last["low"])
         else:
             self.setup.pullback_extreme = float(last["high"])
+        self.setup.pullback_time = mtf.index[-1]
         self.setup.bars_in_state = 0
         self.state = SignalState.WAIT_LTF_CHOCH
 
@@ -414,8 +417,11 @@ class CRTStrategy:
         last = ltf.iloc[-1]
         self._extend_extreme(last)
 
+        # step 6 must FOLLOW step 5: only a CHoCH printed after the fib
+        # pullback was tagged counts (not one from inside the impulse leg)
         ev = last_choch(
-            ltf, self.setup.direction, self.p.swing_lookback, after=self.setup.choch_mtf_time
+            ltf, self.setup.direction, self.p.swing_lookback,
+            after=self.setup.pullback_time or self.setup.choch_mtf_time,
         )
         if ev is None:
             return
@@ -508,24 +514,21 @@ class CRTStrategy:
 
     def _entry_trigger(self, ltf: pd.DataFrame, direction: Direction) -> str | None:
         """Legacy "retest" mode: enter directly on the iFVG/CISD tag."""
-        tag = self._tags_key_level(ltf, direction)
-        if tag is not None:
-            return tag
-        return None
+        return self._tags_key_level(ltf, direction, after=self.setup.choch_mtf_time)
 
-    def _tags_key_level(self, ltf: pd.DataFrame, direction: Direction) -> str | None:
+    def _tags_key_level(
+        self, ltf: pd.DataFrame, direction: Direction, after: pd.Timestamp | None
+    ) -> str | None:
         """Is the LAST candle tagging a key level (iFVG/FVG retest or CISD)?
 
-        The candle that *creates* a gap always touches its own edge, so the
-        retest must come on a strictly later bar than the gap's creation (or
-        inversion) time.
+        Only gaps formed after ``after`` count. The candle that *creates* a gap
+        always touches its own edge, so the retest must come on a strictly
+        later bar than the gap's creation (or inversion) time.
         """
         last = ltf.iloc[-1]
         last_time = ltf.index[-1]
         if self.p.use_ifvg:
-            gap = latest_entry_gap(
-                ltf, direction, after=self.setup.choch_mtf_time, use_ifvg=True
-            )
+            gap = latest_entry_gap(ltf, direction, after=after, use_ifvg=True)
             if gap is not None and last_time > (gap.inverted_time or gap.time):
                 if last["low"] <= gap.top and last["high"] >= gap.bottom:
                     return "ifvg" if gap.inverted else "fvg"
@@ -562,8 +565,9 @@ class CRTStrategy:
                 return "bos"
             return None
 
-        # still waiting for the pullback: a key-level tag completes it
-        if self._tags_key_level(ltf, direction) is not None:
+        # still waiting for the pullback: a key-level tag completes it. Only
+        # key levels from the LTF CHoCH leg onward count (step 6 ordering).
+        if self._tags_key_level(ltf, direction, after=setup.choch_ltf_time) is not None:
             setup.ltf_pullback_done = True
             return None
 

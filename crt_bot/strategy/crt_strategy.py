@@ -33,9 +33,9 @@ from ..core.timeframes import TFSet
 from ..smc import crt as crt_mod
 from ..smc import fib as fib_mod
 from ..smc.cisd import detect_cisd
-from ..smc.fvg import find_fvgs, latest_entry_gap
+from ..smc.fvg import find_fvgs, find_ifvgs, latest_entry_gap
 from ..smc.liquidity import detect_sweep
-from ..smc.order_block import find_order_blocks
+from ..smc.order_block import find_breaker_blocks, find_order_blocks
 from ..smc.structure import last_choch, structure_events, swing_points
 
 
@@ -45,9 +45,11 @@ class StrategyParams:
     tf_set: TFSet
     sessions: SessionSet
 
-    # POI
+    # POI / HTF key levels
     use_fvg: bool = True
+    poi_use_ifvg: bool = True           # inverted FVGs as key levels
     use_order_block: bool = True
+    use_breaker_block: bool = True      # failed OBs with flipped polarity
     use_liquidity_sweep: bool = True
     lookback_sessions: int = 3
     poi_validity_bars: int = 6          # POI must be tagged within this many HTF bars of the CRT
@@ -93,7 +95,9 @@ class StrategyParams:
             tf_set=tf_set,
             sessions=sessions,
             use_fvg=poi.get("use_fvg", True),
+            poi_use_ifvg=poi.get("use_ifvg", True),
             use_order_block=poi.get("use_order_block", True),
+            use_breaker_block=poi.get("use_breaker_block", True),
             use_liquidity_sweep=poi.get("use_liquidity_sweep", True),
             lookback_sessions=poi.get("lookback_sessions", 3),
             require_close_inside=crt.get("require_close_inside", True),
@@ -273,9 +277,16 @@ class CRTStrategy:
     def _poi_confluence(
         self, htf: pd.DataFrame, direction: Direction, now: pd.Timestamp
     ) -> bool:
-        """A POI of ``direction`` tagged within the recent HTF window."""
+        """A key level of ``direction`` tagged within the recent HTF window.
+
+        Key levels: prior-session liquidity sweeps, FVGs, inverted FVGs
+        (iFVG), order blocks and breaker blocks.
+        """
         recent = htf.tail(self.p.poi_validity_bars + 3)
         last = htf.iloc[-1]
+
+        def touches(zone_top: float, zone_bottom: float) -> bool:
+            return last["low"] <= zone_top and last["high"] >= zone_bottom
 
         if self.p.use_liquidity_sweep:
             sweep = detect_sweep(htf, self.p.sessions, now, self.p.lookback_sessions)
@@ -284,16 +295,29 @@ class CRTStrategy:
 
         if self.p.use_fvg:
             for g in find_fvgs(recent):
-                if g.direction is direction and last["low"] <= g.top and last["high"] >= g.bottom:
+                if g.direction is direction and touches(g.top, g.bottom):
+                    return True
+
+        if self.p.poi_use_ifvg:
+            for g in find_ifvgs(recent):
+                if g.direction is direction and touches(g.top, g.bottom):
                     return True
 
         if self.p.use_order_block:
             for ob in find_order_blocks(recent):
-                if ob.direction is direction and last["low"] <= ob.top and last["high"] >= ob.bottom:
+                if ob.direction is direction and touches(ob.top, ob.bottom):
                     return True
 
-        # If the user disabled every POI source, don't gate on confluence.
-        if not (self.p.use_liquidity_sweep or self.p.use_fvg or self.p.use_order_block):
+        if self.p.use_breaker_block:
+            for bb in find_breaker_blocks(recent):
+                if bb.direction is direction and touches(bb.top, bb.bottom):
+                    return True
+
+        # If the user disabled every key-level source, don't gate on confluence.
+        if not (
+            self.p.use_liquidity_sweep or self.p.use_fvg or self.p.poi_use_ifvg
+            or self.p.use_order_block or self.p.use_breaker_block
+        ):
             return True
         return False
 

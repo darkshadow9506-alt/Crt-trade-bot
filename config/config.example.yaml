@@ -35,7 +35,9 @@ strategy:
   # Any of these reached => POI condition satisfied.
   poi:
     use_fvg: true
+    use_ifvg: true                   # inverted FVGs as key levels
     use_order_block: true
+    use_breaker_block: true          # failed OBs with flipped polarity
     use_liquidity_sweep: true        # sweep of previous session high/low
     lookback_sessions: 3             # how many prior sessions' highs/lows count as liquidity
 
@@ -163,10 +165,15 @@ live:
   # binance_base_url: "https://api.binance.com"
   # toobit_base_url:  "https://api.toobit.com"
 
-  # mt5 feed (Windows/VPS, terminal running):
+  # mt5 feed (Windows, terminal installed + logged in). This is the EXACT
+  # broker/prop chart. Symbols per broker: gold XAUUSD; NQ = USTEC/US100/
+  # NAS100; ES = US500/SPX500 -- check Market Watch for the exact names.
+  # Candle times are auto-normalised from broker server time to UTC; set a
+  # number (e.g. 3) to override the detected offset.
   # mt5_login: 12345678
   # mt5_password: ""
   # mt5_server: ""
+  # mt5_utc_offset: "auto"
 
 # --- Notifications (live signals) -------------------------------------
 notify:

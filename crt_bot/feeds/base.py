@@ -53,6 +53,7 @@ def build_feed(cfg: dict) -> DataFeed:
             login=live.get("mt5_login"),
             password=live.get("mt5_password"),
             server=live.get("mt5_server"),
+            utc_offset=live.get("mt5_utc_offset", "auto"),
         )
     if name in ("csv", "replay"):
         from .csv_replay import CsvReplayFeed

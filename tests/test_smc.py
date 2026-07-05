@@ -9,6 +9,7 @@ from crt_bot.smc.crt import detect_crt
 from crt_bot.smc.fib import fib_pullback_zone
 from crt_bot.smc.fvg import find_fvgs, find_ifvgs
 from crt_bot.smc.liquidity import detect_sweep
+from crt_bot.smc.order_block import find_breaker_blocks
 from crt_bot.smc.structure import last_choch, structure_events
 
 from .util import make_df, make_df_at
@@ -103,6 +104,29 @@ def test_crt_rejects_close_outside():
     assert detect_crt(make_df(rows)) is None
 
 
+def test_crt_middle_candle_must_close_back_under_high():
+    """The user's rule: the middle (manipulation) candle must CLOSE back under
+    the first candle's high (bearish) / above its low (bullish)."""
+    # bearish attempt: sweeps the high but CLOSES above it -> no CRT
+    rows = [
+        (100, 101, 99, 100),
+        (100, 110, 90, 95),      # range candle: high 110 / low 90
+        (105, 115, 104, 111),    # sweeps 110 but closes 111 > 110 -> invalid
+    ]
+    assert detect_crt(make_df(rows)) is None
+    # same shape but closing back UNDER the high -> valid bearish CRT
+    rows[2] = (105, 115, 104, 108)
+    crt = detect_crt(make_df(rows))
+    assert crt is not None and crt.direction is Direction.SHORT
+    # bullish attempt: sweeps the low but CLOSES below it -> no CRT
+    rows2 = [
+        (100, 101, 99, 100),
+        (100, 110, 90, 105),
+        (95, 96, 85, 89),        # sweeps 90 but closes 89 < 90 -> invalid
+    ]
+    assert detect_crt(make_df(rows2)) is None
+
+
 # -- CISD ---------------------------------------------------------------
 def test_cisd_long():
     rows = [
@@ -129,6 +153,39 @@ def test_fib_pullback_zone_long():
     lo, hi = fib_pullback_zone(100, 110, Direction.LONG, 0.618, 0.79)
     assert abs(hi - 103.82) < 1e-6
     assert abs(lo - 102.1) < 1e-6
+
+
+# -- breaker blocks -------------------------------------------------------
+def test_bullish_ob_flips_to_bearish_breaker():
+    rows = [
+        (100, 101, 99, 99.2),      # down candle -> potential bullish OB [99, 101]
+        (99.2, 103, 99.1, 102.5),  # closes above 101 -> bullish OB confirmed
+        (102.5, 102.8, 98, 98.5),  # closes below 99 -> OB broken, flips bearish
+    ]
+    breakers = find_breaker_blocks(make_df(rows))
+    assert len(breakers) == 1
+    bb = breakers[0]
+    assert bb.direction is Direction.SHORT
+    assert bb.top == 101 and bb.bottom == 99
+
+
+def test_bearish_ob_flips_to_bullish_breaker():
+    rows = [
+        (100, 101.5, 99.5, 101),   # up candle -> potential bearish OB [99.5, 101.5]
+        (101, 101.2, 97, 97.5),    # closes below 99.5 -> bearish OB confirmed
+        (97.5, 103, 97.4, 102.5),  # closes above 101.5 -> flips bullish
+    ]
+    breakers = find_breaker_blocks(make_df(rows))
+    assert len(breakers) == 1 and breakers[0].direction is Direction.LONG
+
+
+def test_unbroken_ob_is_not_a_breaker():
+    rows = [
+        (100, 101, 99, 99.2),
+        (99.2, 103, 99.1, 102.5),  # bullish OB confirmed
+        (102.5, 104, 101.5, 103),  # holds above the OB -> no breaker
+    ]
+    assert find_breaker_blocks(make_df(rows)) == []
 
 
 # -- liquidity sweep ----------------------------------------------------

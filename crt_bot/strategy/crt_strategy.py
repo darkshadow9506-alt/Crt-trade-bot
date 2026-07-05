@@ -1,17 +1,22 @@
 """The multi-timeframe CRT strategy state machine.
 
-Pipeline (HTF -> MTF -> LTF), exactly mirroring the trader's playbook:
+Pipeline (HTF -> MTF -> LTF), mirroring the trader's 8-step playbook:
 
-1.  **HTF** (after the session opens): wait for price to tag a POI (FVG / OB /
-    prior-session liquidity sweep) **and** print a CRT manipulation candle in
-    the same direction. This fixes the trade direction and the CRT range.
-2.  **MTF**: wait for a CHoCH in the CRT direction, then a pullback into the
-    0.618-0.786 fib zone of the impulse leg.
-3.  **LTF**: wait for a CHoCH, then enter on an iFVG / CISD trigger.
+1.  **Bias** -- HTF market direction from swing structure (HH+HL / LH+LL).
+2.  **Key levels** on the HTF (FVG / OB / prior-session liquidity) and wait
+    for a touch.
+3.  **CRT** manipulation candle on the key level -- fixes direction & range.
+4.  **CHoCH** on the MTF in the CRT direction.
+5.  **Pullback** into the 0.618-0.786 fib zone of the impulse leg.
+6.  **CHoCH** on the LTF, then a pullback into a key level (iFVG/FVG zone or
+    CISD confirmation).
+7.  **BOS** on the LTF -- a close breaking the CHoCH leg's extreme.
+8.  **Enter on the BOS** close (``entry.mode: "bos"``, the default). The
+    legacy ``"retest"`` mode enters directly on the iFVG/CISD tag instead.
 
 Risk: SL beyond the pullback extreme (+ ATR padding). Target = CRT extreme when
-the HTF trend agrees with the trade, otherwise the CRT equilibrium (0.5); in
-that counter-trend case the setup is skipped if price already reached
+the HTF bias agrees with the trade, otherwise the CRT equilibrium (0.5); in
+that counter-trend case the setup is cancelled if price already reached
 equilibrium before the entry triggered.
 """
 
@@ -61,6 +66,9 @@ class StrategyParams:
     skip_if_eq_already_touched: bool = True
 
     # entry
+    #   "bos"    -> LTF CHoCH -> pullback to key level -> enter on the BOS close
+    #   "retest" -> enter directly on the iFVG/CISD tag after the LTF CHoCH
+    entry_mode: str = "bos"
     use_ifvg: bool = True
     use_cisd: bool = True
     sl_padding_atr: float = 0.1
@@ -70,7 +78,7 @@ class StrategyParams:
     mtf_choch_timeout: int = 24
     pullback_timeout: int = 24
     ltf_choch_timeout: int = 40
-    ltf_entry_timeout: int = 40
+    ltf_entry_timeout: int = 60
 
     @classmethod
     def from_config(cls, cfg: dict, tf_set: TFSet, sessions: SessionSet) -> "StrategyParams":
@@ -95,6 +103,7 @@ class StrategyParams:
             pullback_max=fib.get("pullback_max", 0.786),
             equilibrium_level=fib.get("equilibrium_level", 0.5),
             skip_if_eq_already_touched=fib.get("skip_if_eq_already_touched", True),
+            entry_mode=entry.get("mode", "bos"),
             use_ifvg=entry.get("use_ifvg", True),
             use_cisd=entry.get("use_cisd", True),
             sl_padding_atr=entry.get("sl_padding_atr", 0.1),
@@ -117,6 +126,10 @@ class _Setup:
     choch_mtf_time: pd.Timestamp | None = None
     choch_ltf_time: pd.Timestamp | None = None
     eq_touched: bool = False                # did price reach the 50% before entry?
+    # BOS entry mode: the CHoCH leg's extreme is the BOS reference level; a
+    # pullback into a key level must happen before a close beyond it counts.
+    ltf_leg_extreme: float | None = None
+    ltf_pullback_done: bool = False
     bars_in_state: int = 0
     tags: list[str] = field(default_factory=list)
 
@@ -409,7 +422,10 @@ class CRTStrategy:
             self.reset()
             return None
 
-        trigger = self._entry_trigger(ltf, direction)
+        if self.p.entry_mode == "bos":
+            trigger = self._bos_entry_check(ltf, direction)
+        else:
+            trigger = self._entry_trigger(ltf, direction)
         if trigger is None:
             return None
 
@@ -467,19 +483,71 @@ class CRTStrategy:
         return signal
 
     def _entry_trigger(self, ltf: pd.DataFrame, direction: Direction) -> str | None:
+        """Legacy "retest" mode: enter directly on the iFVG/CISD tag."""
+        tag = self._tags_key_level(ltf, direction)
+        if tag is not None:
+            return tag
+        return None
+
+    def _tags_key_level(self, ltf: pd.DataFrame, direction: Direction) -> str | None:
+        """Is the LAST candle tagging a key level (iFVG/FVG retest or CISD)?
+
+        The candle that *creates* a gap always touches its own edge, so the
+        retest must come on a strictly later bar than the gap's creation (or
+        inversion) time.
+        """
+        last = ltf.iloc[-1]
+        last_time = ltf.index[-1]
         if self.p.use_ifvg:
             gap = latest_entry_gap(
                 ltf, direction, after=self.setup.choch_mtf_time, use_ifvg=True
             )
-            if gap is not None:
-                last = ltf.iloc[-1]
-                # price retesting the gap zone
+            if gap is not None and last_time > (gap.inverted_time or gap.time):
                 if last["low"] <= gap.top and last["high"] >= gap.bottom:
                     return "ifvg" if gap.inverted else "fvg"
         if self.p.use_cisd:
-            c = detect_cisd(ltf, direction)
-            if c is not None:
+            if detect_cisd(ltf, direction) is not None:
                 return "cisd"
+        return None
+
+    def _bos_entry_check(self, ltf: pd.DataFrame, direction: Direction) -> str | None:
+        """Steps 6-8 of the playbook: after the LTF CHoCH, wait for a pullback
+        into a key level, then enter when a close breaks the CHoCH leg's
+        extreme (BOS). Returns "bos" on the entry bar, else None.
+        """
+        setup = self.setup
+        assert setup is not None and setup.choch_ltf_time is not None
+        last = ltf.iloc[-1]
+        close = float(last["close"])
+
+        # BOS reference = the CHoCH leg's extreme over bars BEFORE this one
+        # (the breaking close must clear a level set by prior bars).
+        if setup.ltf_leg_extreme is None:
+            leg = ltf[(ltf.index >= setup.choch_ltf_time) & (ltf.index < ltf.index[-1])]
+            if leg.empty:
+                return None
+            setup.ltf_leg_extreme = (
+                float(leg["high"].max()) if direction is Direction.LONG
+                else float(leg["low"].min())
+            )
+
+        if setup.ltf_pullback_done:
+            if direction is Direction.LONG and close > setup.ltf_leg_extreme:
+                return "bos"
+            if direction is Direction.SHORT and close < setup.ltf_leg_extreme:
+                return "bos"
+            return None
+
+        # still waiting for the pullback: a key-level tag completes it
+        if self._tags_key_level(ltf, direction) is not None:
+            setup.ltf_pullback_done = True
+            return None
+
+        # no pullback yet -> the leg is still running; extend the BOS reference
+        if direction is Direction.LONG:
+            setup.ltf_leg_extreme = max(setup.ltf_leg_extreme, float(last["high"]))
+        else:
+            setup.ltf_leg_extreme = min(setup.ltf_leg_extreme, float(last["low"]))
         return None
 
     # -- shared ------------------------------------------------------------

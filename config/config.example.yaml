@@ -62,9 +62,13 @@ strategy:
     # in a counter-trend setup => skip the trade entirely.
     skip_if_eq_already_touched: true
 
-  # LTF entry refinement: enter on inversion FVG (iFVG) or change in
-  # state of delivery (CISD) after the LTF CHoCH.
+  # LTF entry (steps 6-8 of the playbook):
+  #   mode "bos"    -> LTF CHoCH -> pullback into a key level (iFVG/FVG or
+  #                    CISD) -> enter when a close breaks the CHoCH leg's
+  #                    extreme (BOS). This is the strategy spec default.
+  #   mode "retest" -> legacy: enter directly on the iFVG/CISD tag.
   entry:
+    mode: "bos"
     use_ifvg: true
     use_cisd: true
     # Stop loss is placed beyond the pullback extreme (the candle that first

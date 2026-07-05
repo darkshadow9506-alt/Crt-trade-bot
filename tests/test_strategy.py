@@ -27,6 +27,9 @@ def _params(**kw) -> StrategyParams:
         use_liquidity_sweep=False,
         min_wick_sweep_atr=0.0,
         swing_lookback=2,
+        # these tests exercise the TP/entry construction directly on the tag
+        # bar; BOS-mode sequencing has its own tests in test_bos_entry.py
+        entry_mode="retest",
     )
     base.update(kw)
     return StrategyParams(**base)

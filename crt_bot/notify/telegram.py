@@ -70,11 +70,19 @@ def format_signal(
         lines.append(f"📈 Market bias: <b>{s.market_bias.upper()}</b>{basis}")
     if s.tp_mode:
         lines.append(f"🎯 TP rule   : {_TP_LABEL.get(s.tp_mode, s.tp_mode)}")
-    if s.entry_trigger:
+    if s.entry_trigger == "bos":
+        lines.append("🔑 Trigger   : BOS after LTF CHoCH + pullback")
+    elif s.entry_trigger:
         lines.append(f"🔑 Trigger   : {s.entry_trigger.upper()} after LTF CHoCH")
 
     lines.append("")
-    lines.append("<i>✓ POI + CRT + MTF CHoCH + 0.618–0.786 pullback + LTF CHoCH + entry</i>")
+    if s.entry_trigger == "bos":
+        lines.append(
+            "<i>✓ Bias + KeyLevel + CRT + MTF CHoCH + 0.618–0.786 pullback"
+            " + LTF CHoCH + pullback + BOS</i>"
+        )
+    else:
+        lines.append("<i>✓ POI + CRT + MTF CHoCH + 0.618–0.786 pullback + LTF CHoCH + entry</i>")
     return "\n".join(lines)
 
 
